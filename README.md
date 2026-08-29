@@ -27,6 +27,18 @@ Site defaults (shows root, package roots, launch and terminal commands) are
 commented out in `package.py`'s `commands()` — uncommenting one moves the
 default for everybody. Per-user Settings still take precedence.
 
+### Versioning
+
+The version lives in three files — `package.py`, `pyproject.toml` and
+`bootycall/__init__.py` — and they are bumped **in the same commit as the change
+they describe**, with an entry added to `CHANGELOG.md`. `tests/test_packaging.py`
+fails if the three disagree, or if the newest changelog entry is not the current
+version.
+
+Minor for a change to how a launch is assembled, patch for everything else. The
+window title carries the version, so a problem reported from the floor is
+reported against something specific — and a rollback pulls the build you meant.
+
 ## Tests
 
 ```

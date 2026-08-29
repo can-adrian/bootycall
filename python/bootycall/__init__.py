@@ -5,6 +5,6 @@ Pick a show from ``/ice/shows``, pick a DCC, review the rez package request that
 the show's bootstrap would resolve, and launch it.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = ["__version__"]

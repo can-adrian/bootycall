@@ -59,6 +59,24 @@ check(
     "%s vs %s" % (pyproject_version, bootycall.__version__),
 )
 
+# The three files agreeing only proves they were changed together. This is the
+# check that makes a bump mean something: a release with no entry describing it
+# is a version number nobody can look up.
+changelog = (ROOT / "CHANGELOG.md").read_text()
+entries = re.findall(r"^## (\S+)$", changelog, re.M)
+check("the changelog has entries", bool(entries), str(entries))
+check(
+    "and its newest one is this version",
+    bool(entries) and entries[0] == bootycall.__version__,
+    "changelog says %s, code says %s"
+    % (entries[0] if entries else "nothing", bootycall.__version__),
+)
+check(
+    "every version is listed once",
+    len(entries) == len(set(entries)),
+    str(entries),
+)
+
 print("\nrequirements match what the code imports")
 requires = " ".join(package.get("requires", []))
 check("needs PySide6", "PySide6" in requires, requires)
