@@ -71,7 +71,11 @@ from .style import STYLESHEET
 
 #: Width of a software tile, and therefore the width compact mode aims for --
 #: the whole collapsed window should be no wider than one icon plus padding.
-DCC_TILE_WIDTH = 104
+#: Floor for a tile's width. Tiles are sized to the widest label in the row and
+#: then all set to that one size, so the row reads as a set of equals rather
+#: than a ragged line -- but a row of nothing but short names should still not
+#: collapse to something you have to aim at.
+DCC_TILE_MIN_WIDTH = 84
 
 #: Item roles on the local/dev package rows.
 _PACKAGE_NAME_ROLE = Qt.UserRole
@@ -187,6 +191,9 @@ class MainWindow(QMainWindow):
         #: (bootstrap path, mtime) -> ProbeResult. Keyed on mtime so editing a
         #: bootstrap re-probes it, and re-selecting a show does not.
         self._probe_cache: dict[tuple[str, float], probe.ProbeResult] = {}
+        #: The one width every tile in the row is set to. Recomputed
+        #: whenever the row changes, since the labels in it change with it.
+        self._tile_width = DCC_TILE_MIN_WIDTH
         self.store = store if store is not None else ConfigStore()
         # Before anything reads a path: the stored settings are the outermost
         # layer, and reload_projects() fires as soon as the window is up.
@@ -271,7 +278,7 @@ class MainWindow(QMainWindow):
         self.terminal_button.setIcon(_badge(">_", "#6c7a89"))
         self.terminal_button.setIconSize(QSize(26, 26))
         self.terminal_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-        self.terminal_button.setMinimumWidth(DCC_TILE_WIDTH)
+        self.terminal_button.setMinimumWidth(DCC_TILE_MIN_WIDTH)
         self.terminal_button.setToolTip(
             "Open a shell resolved against the selected package set"
         )
@@ -284,12 +291,9 @@ class MainWindow(QMainWindow):
         root.addSpacing(4)
 
         # Resolved packages (collapsed by default) -------------------------
-        self.resolve_frame = CollapsibleFrame(
-            "Resolved packages", expanded=False, checkable=True, locked=True
-        )
-        self.resolve_frame.check_box.setToolTip(
-            "Always used - there is nothing to launch without it"
-        )
+        # No checkbox: there is nothing to launch without the resolve, so an
+        # always-on control was only ever a greyed-out thing to wonder about.
+        self.resolve_frame = CollapsibleFrame("Resolved packages", expanded=False)
         self.resolve_frame.toggled.connect(self._on_frame_toggled)
         self.package_list = QListWidget()
         self.package_list.setSelectionMode(QListWidget.ExtendedSelection)
@@ -359,23 +363,16 @@ class MainWindow(QMainWindow):
         self._apply_frame_stretch()
 
     def _build_package_section(
-        self, title: str, locked: bool = False
+        self, title: str
     ) -> tuple[CollapsibleFrame, QLabel, QListWidget]:
         """One collapsed package section: checkbox, header, root path, list."""
-        frame = CollapsibleFrame(
-            title, expanded=False, checkable=True, checked=True, locked=locked
-        )
+        frame = CollapsibleFrame(title, expanded=False, checkable=True, checked=True)
         frame.toggled.connect(self._on_package_frame_toggled)
-        if locked:
-            frame.check_box.setToolTip(
-                "Always used - there is nothing to launch without it"
-            )
-        else:
-            frame.check_box.setToolTip(
-                "Use these packages. Unchecked, their root is taken off the "
-                "rez packages path for anything BootyCall launches."
-            )
-            frame.checkChanged.connect(self._on_package_use_changed)
+        frame.check_box.setToolTip(
+            "Use these packages. Unchecked, their root is taken off the "
+            "rez packages path for anything BootyCall launches."
+        )
+        frame.checkChanged.connect(self._on_package_use_changed)
 
         path_label = QLabel("")
         path_label.setObjectName("hint")
@@ -907,7 +904,7 @@ class MainWindow(QMainWindow):
             button.setIcon(_badge(dcc.icon_text, dcc.accent))
             button.setIconSize(QSize(26, 26))
             button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-            button.setMinimumWidth(DCC_TILE_WIDTH)
+            button.setMinimumWidth(DCC_TILE_MIN_WIDTH)
             button.variantMenuRequested.connect(self._on_variant_menu)
 
             self._dcc_variants[dcc.name] = keys
@@ -924,6 +921,8 @@ class MainWindow(QMainWindow):
             self.dcc_group.addButton(button)
             # Before the Terminal and Favourites tiles, which stay last.
             self.dcc_row.insertWidget(self.dcc_row.count() - 2, button)
+
+        self._equalise_tiles()
 
         shown = [(d, k) for d, k in entries if d.name in self._visible_software]
         if shown:
@@ -951,6 +950,34 @@ class MainWindow(QMainWindow):
         self._dcc_variants.clear()
         self._active_dcc = None
         self.dcc_placeholder.show()
+        self._equalise_tiles()
+
+    def _equalise_tiles(self) -> None:
+        """Give every tile in the row the same size, set by the widest of them.
+
+        Tiles size themselves to their own label, so a row of Houdini, HouFX,
+        Maya and Terminal comes out as four different widths -- which reads as
+        four different kinds of thing rather than one set to choose from.
+
+        The size is measured rather than hardcoded: the labels are the things
+        that decide it, and a number in the source would go stale the next time
+        one of them is renamed. Terminal is measured with the rest, since it
+        sits in the same row and looks wrong at any other width.
+        """
+        tiles = list(self._dcc_buttons.values()) + [self.terminal_button]
+
+        # Released first, or last pass's fixed size is what gets measured.
+        for tile in tiles:
+            tile.setMinimumSize(0, 0)
+            tile.setMaximumSize(16777215, 16777215)
+
+        width = max([t.sizeHint().width() for t in tiles] + [DCC_TILE_MIN_WIDTH])
+        height = max(t.sizeHint().height() for t in tiles)
+        for tile in tiles:
+            tile.setFixedSize(width, height)
+        self._tile_width = width
+
+        self.dcc_row.invalidate()
 
     def _on_dcc_clicked(self, button: DccTile) -> None:
         dcc = config.dcc_by_name(button.dcc_name)
@@ -1735,7 +1762,7 @@ class MainWindow(QMainWindow):
         # Show codes are longer than a tile; elide rather than let one chip set
         # the width of the whole collapsed window.
         self.chip_bar.set_chip_max_width(
-            DCC_TILE_WIDTH - 12 if compact else None
+            self._tile_width - 12 if compact else None
         )
         self._root_layout.setContentsMargins(
             *(self.COMPACT_MARGINS if compact else self.EXPANDED_MARGINS)

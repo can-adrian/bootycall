@@ -33,7 +33,6 @@ class CollapsibleFrame(QWidget):
         expanded: bool = False,
         checkable: bool = False,
         checked: bool = True,
-        locked: bool = False,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -54,10 +53,6 @@ class CollapsibleFrame(QWidget):
             self.check_box = QCheckBox()
             self.check_box.setObjectName("collapsibleCheck")
             self.check_box.setChecked(checked)
-            if locked:
-                # Checked and not changeable: greying it is the right signal
-                # here, since it genuinely cannot be turned off.
-                self.check_box.setEnabled(False)
             self.check_box.toggled.connect(self.checkChanged)
             header_layout.addWidget(self.check_box)
 

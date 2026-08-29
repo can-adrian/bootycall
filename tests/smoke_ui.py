@@ -169,9 +169,55 @@ check("and it is selected", window.chip_bar.selected_name() == "batman_returns")
 check("the entry field cleared itself", window.project_field.text() == "")
 check("bootstrap parsed", window._bootstrap is not None)
 check(
-    "only the four default-visible DCCs get tiles",
+    "the default row is Houdini and Maya, which with Terminal is three tiles",
+    list(window._dcc_buttons) == ["houdinicore", "maya"],
+    str(list(window._dcc_buttons)),
+)
+check(
+    "labelled the short way",
+    [window._dcc_buttons[n].text() for n in ("houdinicore", "maya")]
+    == ["Houdini", "Maya"],
+    str([window._dcc_buttons[n].text() for n in ("houdinicore", "maya")]),
+)
+
+print("\nevery tile is the same size, including Terminal")
+_tiles = list(window._dcc_buttons.values()) + [window.terminal_button]
+check(
+    "one width across the row",
+    len({t.width() for t in _tiles}) == 1,
+    str([(t.text(), t.width()) for t in _tiles]),
+)
+check(
+    "one height too",
+    len({t.height() for t in _tiles}) == 1,
+    str([(t.text(), t.height()) for t in _tiles]),
+)
+check(
+    "wide enough for the longest label in it",
+    all(t.width() >= t.sizeHint().width() for t in _tiles),
+    str([(t.text(), t.width(), t.sizeHint().width()) for t in _tiles]),
+)
+_narrow_row = window._tile_width
+
+print("\nthe rest of the suite wants the wider row, so turn the others on")
+window._software_actions["houdinifx"].setChecked(True)
+window._software_actions["nuke"].setChecked(True)
+QApplication.processEvents()
+check(
+    "four tiles now",
     list(window._dcc_buttons) == ["houdinicore", "houdinifx", "maya", "nuke"],
     str(list(window._dcc_buttons)),
+)
+_tiles = list(window._dcc_buttons.values()) + [window.terminal_button]
+check(
+    "still exactly one size between them",
+    len({(t.width(), t.height()) for t in _tiles}) == 1,
+    str([(t.text(), t.width()) for t in _tiles]),
+)
+check(
+    "and it never drops below the floor",
+    window._tile_width >= 84,
+    str(window._tile_width),
 )
 check(
     "hiero and blender are defined but hidden",
@@ -320,7 +366,7 @@ check("launch disabled", not window.launch_button.isEnabled())
 check(
     "explains why, naming the registry",
     "none of" in window.status_label.text()
-    and "Houdini Core" in window.status_label.text()
+    and "Houdini" in window.status_label.text()
     and "Blender" in window.status_label.text(),
     window.status_label.text(),
 )
@@ -660,11 +706,15 @@ check(
 )
 
 print("\npackage sections can be switched off")
-check("all three have a checkbox", all(f.check_box is not None for f in (window.resolve_frame, window.local_frame, window.dev_frame)))
-check("all checked by default", all(f.is_checked() for f in (window.resolve_frame, window.local_frame, window.dev_frame)))
+check("the two optional sections have a checkbox", all(f.check_box is not None for f in (window.local_frame, window.dev_frame)))
+check("both checked by default", all(f.is_checked() for f in (window.local_frame, window.dev_frame)))
 check(
-    "the resolve one is locked on - there is nothing to launch without it",
-    not window.resolve_frame.check_box.isEnabled() and window.resolve_frame.is_checked(),
+    "the resolve section has none at all - there is nothing to launch without it",
+    window.resolve_frame.check_box is None,
+)
+check(
+    "and it still counts as in use, so nothing reads it as switched off",
+    window.resolve_frame.is_checked(),
 )
 check("the other two can be changed", window.local_frame.check_box.isEnabled() and window.dev_frame.check_box.isEnabled())
 check("nothing excluded while everything is on", window.excluded_roots() == ())
@@ -937,7 +987,8 @@ check(
     window.compact_button.x() < window.width() / 2,
     "%d of %d" % (window.compact_button.x(), window.width()),
 )
-from bootycall.ui.main_window import DCC_TILE_WIDTH  # noqa: E402
+# The row's uniform tile width, whatever the labels in it worked out to.
+DCC_TILE_WIDTH = window._tile_width
 
 check(
     "the launch button reads GO! while compact",
@@ -1260,9 +1311,9 @@ shot(window, "15-all-hidden")
 
 window._on_reset_software()
 QApplication.processEvents()
-check("reset restores the defaults", list(window._dcc_buttons) == ["houdinicore", "houdinifx", "maya", "nuke"], str(list(window._dcc_buttons)))
+check("reset restores the defaults", list(window._dcc_buttons) == ["houdinicore", "maya"], str(list(window._dcc_buttons)))
 check("reset clears the stored preference", window.store.visible_software() is None)
-check("menu checkboxes follow", [n for n, a in window._software_actions.items() if a.isChecked()] == ["houdinicore", "houdinifx", "maya", "nuke"])
+check("menu checkboxes follow", [n for n, a in window._software_actions.items() if a.isChecked()] == ["houdinicore", "maya"])
 
 print("\nlaunching resolves, opens a terminal, and runs the DCC")
 from bootycall import config as _cfg  # noqa: E402
@@ -1281,6 +1332,10 @@ for _name in ("maya", "nuke", "hiero", "blender", "nukestudio"):
         _cfg.dcc_by_name(_name).run_command == _name,
     )
 
+# Nuke is not in the default row any more, and the visibility tests above have
+# been turning tiles on and off, so ask for it rather than assuming it is there.
+window._software_actions["nuke"].setChecked(True)
+QApplication.processEvents()
 window._dcc_buttons["nuke"].click()
 QApplication.processEvents()
 launch_argv = launcher.build_command(window.resolved_packages(), window._active_dcc.run_command)
@@ -1336,6 +1391,8 @@ check(
     launcher.build_script(("a b-1",), "maya")[:80],
 )
 
+window._software_actions["houdinifx"].setChecked(True)
+QApplication.processEvents()
 window._dcc_buttons["houdinifx"].click()
 QApplication.processEvents()
 check(

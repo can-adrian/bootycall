@@ -10,6 +10,19 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.2.1
+
+- **Houdini Core is now just Houdini, and Houdini FX is HouFX.** The row is read
+  at a glance, and the long names were the reason it could not be.
+- **Every tile is the same size**, measured from the widest label in the row
+  rather than hardcoded, so a rename cannot leave it stale. Terminal is measured
+  with the rest, since it sits in the same row and looked wrong at any other
+  width.
+- **The default row is Houdini, Maya and Terminal.** The others are one click
+  away in the Softwares menu, and whatever you turn on is remembered.
+- **The Resolved packages checkbox is gone.** It could never be unticked, so it
+  was a greyed-out control that only invited the question.
+
 ## 0.2.0
 
 Everything between the first working build and here. Released as one version

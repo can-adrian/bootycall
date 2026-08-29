@@ -278,6 +278,9 @@ class Dcc:
     #: Shown without the user turning it on. The long tail (Nuke Studio, Hiero,
     #: Blender) is real but rarely wanted, and a row of nine tiles buries the
     #: four people actually reach for.
+    #: Whether this tile is in the row before anyone changes it. The default
+    #: row is Houdini, Maya and Terminal -- the three that cover most of a day.
+    #: Everything else is one click away in the Softwares menu.
     default_visible: bool = True
 
     def available_keys(self, packages: dict) -> tuple[str, ...]:
@@ -301,7 +304,7 @@ DCCS: tuple[Dcc, ...] = (
         name="houdinicore",
         version_package="houdini",
         variant_tags={"prman": "RenderMan", "dev_houdini": "dev"},
-        label="Houdini Core",
+        label="Houdini",
         package_group="houdini_package",
         icon_text="HC",
         accent="#ff7a18",
@@ -320,7 +323,7 @@ DCCS: tuple[Dcc, ...] = (
         command="houdini",
         version_package="houdini",
         variant_tags={"prmanfx": "RenderMan"},
-        label="Houdini FX",
+        label="HouFX",
         package_group="hou_fx_plugins",
         icon_text="FX",
         accent="#ffa04d",
@@ -329,6 +332,7 @@ DCCS: tuple[Dcc, ...] = (
             "houdinifx": "Houdini FX",
             "prmanfx": "Houdini FX + RenderMan",
         },
+        default_visible=False,
     ),
     Dcc(
         name="maya",
@@ -370,6 +374,7 @@ DCCS: tuple[Dcc, ...] = (
             "nuke": "Nuke 13.2",
             "nuke16": "Nuke 16.0",
         },
+        default_visible=False,
     ),
     Dcc(
         name="nukestudio",

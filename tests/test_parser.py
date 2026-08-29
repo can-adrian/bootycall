@@ -184,9 +184,20 @@ check("dev is a reserved package name", config.RESERVED_PACKAGE_NAMES == ("dev",
 print("\nregistry sanity")
 check("seven DCCs configured", len(config.DCCS) == 7)
 check(
-    "four shown by default",
-    config.DEFAULT_VISIBLE_SOFTWARE == ("houdinicore", "houdinifx", "maya", "nuke"),
+    "two DCCs shown by default, which with Terminal is the starting row",
+    config.DEFAULT_VISIBLE_SOFTWARE == ("houdinicore", "maya"),
     str(config.DEFAULT_VISIBLE_SOFTWARE),
+)
+check(
+    "Houdini Core is labelled just Houdini, and FX is HouFX",
+    [d.label for d in config.DCCS if d.name.startswith("houdini")]
+    == ["Houdini", "HouFX"],
+    str([d.label for d in config.DCCS if d.name.startswith("houdini")]),
+)
+check(
+    "the labels stay distinct, or two tiles would read the same",
+    len({d.label for d in config.DCCS}) == len(config.DCCS),
+    str([d.label for d in config.DCCS]),
 )
 check(
     "the long tail is off by default",
