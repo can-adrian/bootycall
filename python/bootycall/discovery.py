@@ -109,6 +109,34 @@ def load_bootstrap(project: Project) -> tuple[Bootstrap | None, str]:
     return bootstrap, message
 
 
+def apply_probe(bootstrap: Bootstrap, result) -> str:
+    """Fold a :class:`bootycall.probe.ProbeResult` into a parsed bootstrap.
+
+    Mutates ``bootstrap`` in place and returns a note for the status bar --
+    empty when the probe agreed with the static read, which is the case worth
+    saying nothing about.
+
+    The probe wins when it succeeds, because it ran the module rather than
+    reading it. When it fails, nothing changes: a probe that cannot start is a
+    site that has not pointed BOOTYCALL_PROBE_COMMAND at an interpreter with
+    rez in it, and that must not cost anyone a working launcher.
+    """
+    from . import probe as _probe
+
+    if not getattr(result, "ok", False):
+        return ""
+
+    packages, note = _probe.merge(bootstrap.packages, result)
+    bootstrap.packages = packages
+    bootstrap.show_packages = tuple(result.show_packages)
+    bootstrap.source = "bootstrap"
+    if result.class_name:
+        bootstrap.class_name = result.class_name
+    # Statically unresolvable entries are only a caveat on the static read.
+    bootstrap.unresolved = ()
+    return note
+
+
 def available_dccs(bootstrap: Bootstrap) -> list[tuple[config.Dcc, tuple[str, ...]]]:
     """Filter the hard-coded DCC registry down to what this show defines.
 

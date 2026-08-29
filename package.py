@@ -51,3 +51,15 @@ def commands():
     # never. "always" is useful while getting a site's settings right.
     #
     # env.BOOTYCALL_HOLD_TERMINAL = "error"
+    #
+    # The bootstrap probe imports a show's bootstrap in a throwaway interpreter
+    # and uses what the module actually says, in place of what BootyCall could
+    # read out of the file. That interpreter has to be able to import rez and
+    # ilp_bootstrap, which BootyCall's own is not required to do -- so point
+    # this at one that can:
+    #
+    # env.BOOTYCALL_PROBE_COMMAND = "rez-env:ilp_bootstrap:--:python:{script}:{bootstrap}"
+    #
+    # Or switch it off entirely and stay with the static read:
+    #
+    # env.BOOTYCALL_PROBE_MODE = "off"

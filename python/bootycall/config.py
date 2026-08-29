@@ -123,6 +123,55 @@ BOOTSTRAP_MARKER = "Bootstrap"
 
 
 # ---------------------------------------------------------------------------
+# Bootstrap probe
+# ---------------------------------------------------------------------------
+#
+# The static reader is always used: it is instant, needs nothing installed, and
+# is what the UI draws from the moment a show is picked. The probe is the
+# second opinion -- it imports the real bootstrap in a throwaway interpreter and
+# reports what that module actually says, which catches anything computed at
+# import time and anything a change to ilp_bootstrap alters underneath us.
+#
+# It is a second opinion rather than the only one because it needs an
+# interpreter that can import rez and ilp_bootstrap, and BootyCall's own cannot
+# be assumed to be one.
+
+#: ``auto`` runs the probe in the background and prefers its answer when it
+#: arrives; ``off`` never runs it and leaves BootyCall entirely static.
+PROBE_MODE = os.environ.get("BOOTYCALL_PROBE_MODE", "auto").strip().lower()
+
+#: Argv template for the probe, colon-separated in the environment variable.
+#: ``{script}`` is bootycall's probe_main.py, ``{bootstrap}`` the module to read.
+#:
+#: The default assumes ``python`` on PATH can import rez -- true inside a rez
+#: session, not necessarily true elsewhere. Sites where it is not should point
+#: this at one that can, e.g.
+#: BOOTYCALL_PROBE_COMMAND="rez-env:ilp_bootstrap:--:python:{script}:{bootstrap}"
+PROBE_COMMAND: Sequence[str] = tuple(
+    os.environ["BOOTYCALL_PROBE_COMMAND"].split(":")
+    if os.environ.get("BOOTYCALL_PROBE_COMMAND")
+    else ("python", "{script}", "{bootstrap}")
+)
+
+#: Seconds before the probe is given up on. Importing rez is not fast, but a
+#: bootstrap that takes longer than this has something wrong with it and the
+#: static answer is the better one to keep.
+PROBE_TIMEOUT = float(os.environ.get("BOOTYCALL_PROBE_TIMEOUT", "20"))
+
+
+def probe_enabled() -> bool:
+    return PROBE_MODE not in ("off", "0", "no", "false")
+
+
+def probe_command() -> tuple[str, ...]:
+    return tuple(PROBE_COMMAND)
+
+
+def probe_timeout() -> float:
+    return PROBE_TIMEOUT
+
+
+# ---------------------------------------------------------------------------
 # Launching
 # ---------------------------------------------------------------------------
 

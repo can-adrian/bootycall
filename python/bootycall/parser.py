@@ -52,6 +52,14 @@ class Bootstrap:
     scalars: dict[str, str] = field(default_factory=dict)
     #: names that appear in the source but could not be statically resolved
     unresolved: tuple[str, ...] = ()
+    #: Where ``packages`` came from: ``static`` (this parser) or ``bootstrap``
+    #: (the module itself, via :mod:`bootycall.probe`). Displayed, so that a
+    #: list read from a running import is never mistaken for a guess.
+    source: str = "static"
+    #: Requests the bootstrap adds to every resolve, from ``_get_show_packages``.
+    #: Only the probe can know these; the static reader leaves it empty and
+    #: BootyCall falls back to looking for the package on disk itself.
+    show_packages: tuple[str, ...] = ()
 
     def tools(self) -> tuple[str, ...]:
         return tuple(sorted(self.packages))

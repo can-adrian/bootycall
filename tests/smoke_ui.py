@@ -1465,6 +1465,143 @@ unpin_all()
 check("terminal tile disabled with no show", not window.terminal_button.isEnabled())
 check("no packages, no terminal", window.resolved_packages() == ())
 
+print("\nasking the bootstrap itself")
+import time  # noqa: E402
+
+from bootycall import probe as probe_mod  # noqa: E402
+
+# A show whose bootstrap computes half its tools, so the static read and the
+# running module genuinely disagree -- which is the only case where any of this
+# earns its keep.
+probe_shows = Path(tempfile.mkdtemp(prefix="bootycall-probe-shows-"))
+_pipeline = probe_shows / "probed_show" / ".ilp" / "pipeline"
+_pipeline.mkdir(parents=True)
+(_pipeline / "ilp_bootstrap.py").write_text(
+    "class Bootstrap(object):\n    packages = {}\n"
+)
+(_pipeline / "config.py").write_text(
+    "from ilp_bootstrap import Bootstrap\n"
+    "\n"
+    "\n"
+    "class ProjectBootstrap(Bootstrap):\n"
+    "    packages = dict(maya=('maya-2026.3',))\n"
+    "    packages['nuke'] = tuple('nuke-%s' % v for v in ('16.0',))\n"
+    "\n"
+    "    def _get_show_packages(self):\n"
+    "        return ('show_probed',)\n"
+)
+
+
+def wait_for_probe(seconds: float = 30.0) -> None:
+    deadline = time.time() + seconds
+    while window._probe_process is not None and time.time() < deadline:
+        QApplication.processEvents()
+        time.sleep(0.01)
+    QApplication.processEvents()
+
+
+cfg_mod.set_path_overrides({"shows_root": str(probe_shows)})
+window.reload_projects()
+QApplication.processEvents()
+unpin_all()
+pin("probed_show")
+
+check(
+    "the static read draws the window first",
+    window._bootstrap is not None and window._bootstrap.source == "static",
+    "" if window._bootstrap is None else window._bootstrap.source,
+)
+check(
+    "and only sees the tool written literally",
+    list(window._dcc_buttons) == ["maya"],
+    str(list(window._dcc_buttons)),
+)
+
+wait_for_probe()
+check(
+    "the probe's answer replaces it",
+    window._bootstrap.source == "bootstrap",
+    window._bootstrap.source,
+)
+check(
+    "including the tool built at import time",
+    list(window._dcc_buttons) == ["maya", "nuke"],
+    str(list(window._dcc_buttons)),
+)
+check(
+    "the resolved list says where it came from",
+    "from the bootstrap" in window.resolve_frame.badge.text(),
+    window.resolve_frame.badge.text(),
+)
+check(
+    "_get_show_packages is taken at its word",
+    window.show_package_requests() == ("show_probed",),
+    str(window.show_package_requests()),
+)
+check(
+    "and it reaches the resolve",
+    "show_probed" in window.resolved_packages(),
+    str(window.resolved_packages()),
+)
+check(
+    "with a package root behind it, since rez has to find it somewhere",
+    window.included_roots() != (),
+    str(window.included_roots()),
+)
+
+print("\nre-selecting a show does not re-probe it")
+_before = dict(window._probe_cache)
+unpin_all()
+pin("probed_show")
+check("served from cache", window._probe_process is None)
+check("cache untouched", dict(window._probe_cache) == _before)
+check(
+    "and the answer is still the probe's",
+    window._bootstrap.source == "bootstrap"
+    and list(window._dcc_buttons) == ["maya", "nuke"],
+    str(list(window._dcc_buttons)),
+)
+
+print("\nturning the probe off leaves a purely static BootyCall")
+_saved_mode = cfg_mod.PROBE_MODE
+cfg_mod.PROBE_MODE = "off"
+window._probe_cache.clear()
+unpin_all()
+pin("probed_show")
+check("no probe started", window._probe_process is None)
+check(
+    "static answer stands",
+    window._bootstrap.source == "static" and list(window._dcc_buttons) == ["maya"],
+    str(list(window._dcc_buttons)),
+)
+check(
+    "and the show package falls back to what is on disk",
+    window.show_package_requests() == (),
+    str(window.show_package_requests()),
+)
+cfg_mod.PROBE_MODE = _saved_mode
+
+print("\na probe that cannot run costs nothing")
+_saved_cmd = cfg_mod.PROBE_COMMAND
+cfg_mod.PROBE_COMMAND = ("definitely-not-an-interpreter", "{script}", "{bootstrap}")
+window._probe_cache.clear()
+unpin_all()
+pin("probed_show")
+wait_for_probe(5.0)
+check(
+    "the window still works",
+    window._bootstrap is not None and list(window._dcc_buttons) == ["maya"],
+    str(list(window._dcc_buttons)),
+)
+check("nothing was applied", window._bootstrap.source == "static")
+cfg_mod.PROBE_COMMAND = _saved_cmd
+
+cfg_mod.set_path_overrides({})
+window.reload_projects()
+QApplication.processEvents()
+unpin_all()
+pin("batman_returns")
+
 print("\nfavourites window")
 from bootycall.configs import SavedConfig as _SC  # noqa: E402
 from bootycall.ui.config_menu import ConfigMenuAction  # noqa: E402

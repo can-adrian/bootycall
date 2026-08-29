@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import random
 
-from PySide6.QtCore import QPointF, QSize, Qt, QTimer, QUrl
+from PySide6.QtCore import QPointF, QProcess, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import (
     QAction,
     QColor,
@@ -33,16 +34,18 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import __version__, config, dev_install, launcher, platform_hints
+from .. import __version__, config, dev_install, launcher, platform_hints, probe
 from ..configs import ConfigStore, SavedConfig
 from ..discovery import (
     Project,
     ProjectsUnavailable,
+    apply_probe,
     available_dccs,
     list_projects,
     find_show_package,
     load_bootstrap,
     newest_variant,
+    show_package_roots,
     variant_version,
 )
 from ..local_packages import (
@@ -177,6 +180,13 @@ class MainWindow(QMainWindow):
         self._dev_packages: list[LocalPackage] = []
         self._projects_by_name: dict[str, Project] = {}
         self._favorites_window: FavoritesWindow | None = None
+        #: The running bootstrap probe, if any. One at a time: flicking through
+        #: shows must not leave a queue of imports running behind you.
+        self._probe_process: QProcess | None = None
+        self._probe_project: Project | None = None
+        #: (bootstrap path, mtime) -> ProbeResult. Keyed on mtime so editing a
+        #: bootstrap re-probes it, and re-selecting a show does not.
+        self._probe_cache: dict[tuple[str, float], probe.ProbeResult] = {}
         self.store = store if store is not None else ConfigStore()
         # Before anything reads a path: the stored settings are the outermost
         # layer, and reload_projects() fires as soon as the window is up.
@@ -782,6 +792,109 @@ class MainWindow(QMainWindow):
         # the report. Only the failures below still speak up.
         self._set_status("")
         self._populate_dccs(entries)
+        self._start_probe(project, bootstrap)
+
+    # -- asking the bootstrap itself -----------------------------------------
+
+    def _start_probe(self, project: Project, bootstrap: Bootstrap) -> None:
+        """Ask the real bootstrap module what it resolves, in the background.
+
+        The static read has already drawn the window by this point, which is
+        the whole arrangement: you never wait for an interpreter to import rez
+        before you can click anything, and if the probe comes back with
+        something different, the window quietly corrects itself.
+        """
+        self._cancel_probe()
+        if not config.probe_enabled():
+            return
+
+        path = bootstrap.path
+        try:
+            key = (str(path), os.path.getmtime(path))
+        except OSError:
+            return
+
+        cached = self._probe_cache.get(key)
+        if cached is not None:
+            self._apply_probe(project, cached)
+            return
+
+        argv = probe.command(path)
+        process = QProcess(self)
+        process.setWorkingDirectory(str(project.path))
+        process.setProgram(argv[0])
+        process.setArguments(argv[1:])
+        process.finished.connect(
+            lambda _code, _status, k=key, p=project: self._on_probe_finished(k, p)
+        )
+        # A probe that cannot even start is the ordinary state at a site that
+        # has not pointed BOOTYCALL_PROBE_COMMAND anywhere: nothing to report.
+        process.errorOccurred.connect(lambda _err: self._cancel_probe())
+
+        self._probe_process = process
+        self._probe_project = project
+        process.start()
+
+    def _cancel_probe(self) -> None:
+        process, self._probe_process = self._probe_process, None
+        self._probe_project = None
+        if process is None:
+            return
+        try:
+            process.finished.disconnect()
+            process.errorOccurred.disconnect()
+            process.kill()
+            # Brief, and only to stop Qt complaining that it was destroyed with
+            # a child still running: the probe is a doomed import, not work.
+            process.waitForFinished(200)
+            process.deleteLater()
+        except RuntimeError:
+            pass  # already gone; nothing left to cancel
+
+    def closeEvent(self, event) -> None:
+        """Do not leave an import running behind a closed window."""
+        self._cancel_probe()
+        super().closeEvent(event)
+
+    def _on_probe_finished(self, key: tuple[str, float], project: Project) -> None:
+        process, self._probe_process = self._probe_process, None
+        self._probe_project = None
+        if process is None:
+            return
+
+        try:
+            result = probe.parse_output(
+                bytes(process.readAllStandardOutput()).decode("utf-8", "replace"),
+                bytes(process.readAllStandardError()).decode("utf-8", "replace"),
+            )
+        except RuntimeError:
+            # The window was torn down while the import was still running, so
+            # the process went with it. Nothing to report to, either.
+            return
+        self._probe_cache[key] = result
+        # Selection may have moved on while the import was running.
+        current = self.current_project()
+        if current is not None and current.name == project.name:
+            self._apply_probe(project, result)
+
+    def _apply_probe(self, project: Project, result: probe.ProbeResult) -> None:
+        if self._bootstrap is None or not result.ok:
+            return
+
+        before = self._bootstrap.packages
+        note = apply_probe(self._bootstrap, result)
+        if set(before) != set(self._bootstrap.packages):
+            # The set of tools changed, so the tiles are wrong. Rebuilding
+            # keeps the selected software and variant: both live outside the
+            # tiles precisely so a repopulate does not lose them.
+            self._clear_dccs()
+            self._populate_dccs(available_dccs(self._bootstrap))
+        elif self._active_dcc is not None:
+            tool = self._current_tool()
+            if tool:
+                self._show_packages(tool)
+        if note:
+            self._set_status(note, "warn")
 
     def _populate_dccs(self, entries: list[tuple[config.Dcc, tuple[str, ...]]]) -> None:
         for dcc, keys in entries:
@@ -1007,21 +1120,33 @@ class MainWindow(QMainWindow):
             self.package_list.addItem(item)
 
         show_pkg = self.show_package()
-        if show_pkg is not None:
-            # It is part of every resolve, so a list claiming to be the resolve
-            # has to say so.
-            item = QListWidgetItem("%s      (show package)" % show_pkg.name)
+        for name in self.show_package_requests():
+            # Part of every resolve, so a list claiming to be the resolve has
+            # to say so.
+            item = QListWidgetItem("%s      (show package)" % name)
             item.setForeground(QColor("#8fce8f"))
-            item.setToolTip(
-                "%s\nFound under %s, which is added to the packages path for "
-                "the launch." % (show_pkg.path, show_pkg.root)
-            )
+            if show_pkg is not None and show_pkg.name == name:
+                item.setToolTip(
+                    "%s\nFound under %s, which is added to the packages path "
+                    "for the launch." % (show_pkg.path, show_pkg.root)
+                )
+            else:
+                item.setToolTip(
+                    "The bootstrap adds this to every resolve. BootyCall could "
+                    "not find it on disk, so every candidate package root is "
+                    "added to the packages path for the launch."
+                )
             self.package_list.addItem(item)
 
         duplicates = len(packages) - len(seen)
         badge = "%s  -  %d packages" % (key, len(packages))
         if duplicates:
             badge += "  (%d duplicate)" % duplicates
+        if self._bootstrap.source == "bootstrap":
+            # Worth the words: a list the module produced and a list read out
+            # of the file are not the same claim, and only one of them can be
+            # trusted about anything computed at import time.
+            badge += "  · from the bootstrap"
         self.resolve_frame.set_badge(badge)
         self.resolve_frame.set_note(
             "%d overridden locally" % len(shadowed) if shadowed else "",
@@ -1444,10 +1569,20 @@ class MainWindow(QMainWindow):
         if project is None or self._bootstrap is None or tool is None:
             return ()
         packages = tuple(self._bootstrap.packages.get(tool, ()))
+        return packages + self.show_package_requests()
+
+    def show_package_requests(self) -> tuple[str, ...]:
+        """The show packages appended to every resolve.
+
+        When the probe ran, this is whatever ``_get_show_packages()`` returned
+        -- the same call the pipeline makes, including the empty tuple, which
+        is a real answer and not a failure. Otherwise BootyCall falls back to
+        looking for the package on disk itself.
+        """
+        if self._bootstrap is not None and self._bootstrap.source == "bootstrap":
+            return tuple(self._bootstrap.show_packages)
         show_pkg = self.show_package()
-        if show_pkg is not None:
-            packages += (show_pkg.name,)
-        return packages
+        return (show_pkg.name,) if show_pkg is not None else ()
 
     def show_package(self):
         """The selected show's own package, if it has one."""
@@ -1462,9 +1597,21 @@ class MainWindow(QMainWindow):
         A show package lives under the show, or under the user's own package
         directory. Requesting it without putting that root on the path would
         fail to resolve.
+
+        When the probe named a show package BootyCall cannot find on disk, both
+        candidate roots go on instead of neither: rez found it somewhere, and a
+        root that turns out to hold nothing costs a resolve nothing.
         """
         show_pkg = self.show_package()
-        return (str(show_pkg.root),) if show_pkg is not None else ()
+        if show_pkg is not None:
+            return (str(show_pkg.root),)
+
+        project = self.current_project()
+        if project is None or not self.show_package_requests():
+            return ()
+        return tuple(
+            str(root) for root in show_package_roots(project) if root.is_dir()
+        )
 
     def _on_open_terminal(self) -> None:
         project = self.current_project()

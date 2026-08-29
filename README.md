@@ -539,6 +539,58 @@ and the trailing `packages["obj2abc"] = packages["maya"]` aliases. Anything it
 can't reduce is skipped and reported in `Bootstrap.unresolved` rather than
 taking the whole show down.
 
+### …and then it is asked
+
+Reading a file can only see what is written in it. A bootstrap that computes a
+package list, or one whose meaning changes because `ilp_bootstrap` changed
+underneath it, is beyond any static reader — so once the window is drawn,
+BootyCall asks the real module.
+
+`bootycall/probe_main.py` is a standalone script handed to a *separate*
+interpreter: it imports the bootstrap, reads `packages` off the class the
+module installed as `ilp_bootstrap.Bootstrap`, calls `_get_show_packages()`, and
+prints one JSON line behind a `BOOTYCALL-PROBE ` sentinel. `bootycall/probe.py`
+runs it — via `QProcess`, so nothing blocks — and folds the answer in. The
+resolved list then says `· from the bootstrap`, and if the two readings differ
+the status bar says how.
+
+The arrangement matters more than either half:
+
+* **Static first, always.** The window is drawn from the `ast` read the instant
+  a show is picked. Nobody waits for an interpreter to import rez.
+* **The probe only ever improves things.** A missing interpreter, a bootstrap
+  that raises on import, a timeout, output full of prints — every one of them
+  leaves the static answer standing, and none of them is an error dialog.
+* **Show code stays out of the UI's interpreter.** It is a throwaway process;
+  if it leaks, hangs, or dies, it does so alone.
+* **Results are cached per bootstrap mtime**, so flicking between shows costs
+  one import each, not one per click, and editing a bootstrap re-reads it.
+
+The probe needs an interpreter that can `import rez` and `import ilp_bootstrap`.
+BootyCall's own environment is not assumed to be one — set
+`BOOTYCALL_PROBE_COMMAND` if `python` on PATH is not, e.g.
+
+```
+BOOTYCALL_PROBE_COMMAND="rez-env:ilp_bootstrap:--:python:{script}:{bootstrap}"
+```
+
+`BOOTYCALL_PROBE_MODE=off` turns the whole thing off and leaves BootyCall
+purely static.
+
+#### Why not parse what the bootstrap prints?
+
+`run_command()` already writes the request list and `context.print_info()` to
+stderr, which is tempting. But that output is a human-readable side effect: its
+shape is not a contract, it only appears at the moment something launches
+(too late to draw a window with), and reading it means starting a real resolve
+just to ask a question. The probe gets the same information structurally,
+before anything launches, and asks the module rather than its log.
+
+Launching still goes straight to `rez-env` with the request list the window is
+showing. Routing the launch back through the bootstrap would mean the thing you
+looked at and the thing that ran were assembled by different code — the probe
+exists precisely so they are not.
+
 ## The DCC registry
 
 `bootycall/config.py` → `DCCS`. Each entry lists candidate `packages` keys,
@@ -625,6 +677,11 @@ the ones below, and are handy for pointing a session at a test tree:
 | `BOOTYCALL_LOCAL_PACKAGES_ROOT` | `/ice/rez/packages/local/{user}` |
 | `BOOTYCALL_DEV_PACKAGES_ROOT` | `{local}/dev` |
 | `BOOTYCALL_REZ_USER` | the logged-in user |
+| `BOOTYCALL_PROBE_MODE` | `auto` (also `off`) |
+| `BOOTYCALL_PROBE_COMMAND` | `python {script} {bootstrap}` |
+| `BOOTYCALL_PROBE_TIMEOUT` | `20` seconds |
+| `BOOTYCALL_USER_PACKAGES_ROOT` | `~/packages` |
+| `BOOTYCALL_SHOW_PACKAGES_SUBPATH` | `.ilp/packages` |
 
 Both commands run with the show folder as cwd, which is what a bootstrap's
 `__file__`-relative lookups and anything the DCC opens by relative path both
