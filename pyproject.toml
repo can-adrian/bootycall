@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bootycall"
+version = "0.1.0"
+description = "An interface for managing rez environments and resolving packages"
+requires-python = ">=3.9"
+dependencies = ["PySide6>=6.5"]
+
+[project.scripts]
+bootycall = "bootycall.app:main"
+
+# The rez package is the primary way this ships; pyproject is here so a
+# developer can pip install -e . and get the same entry point.
+[tool.setuptools.packages.find]
+where = ["python"]
+include = ["bootycall*"]
+
+[tool.setuptools.package-dir]
+"" = "python"

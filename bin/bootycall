@@ -1,0 +1,9 @@
+#!/usr/bin/env python
+"""Console entry point. The rez package puts this directory on PATH."""
+
+import sys
+
+from bootycall.app import main
+
+if __name__ == "__main__":
+    sys.exit(main())

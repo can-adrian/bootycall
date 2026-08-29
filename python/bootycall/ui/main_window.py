@@ -1,0 +1,1668 @@
+"""BootyCall main window."""
+
+from __future__ import annotations
+
+import random
+
+from PySide6.QtCore import QPointF, QSize, Qt, QTimer, QUrl
+from PySide6.QtGui import (
+    QAction,
+    QColor,
+    QDesktopServices,
+    QKeySequence,
+    QPainter,
+    QPen,
+    QPixmap,
+)
+from PySide6.QtWidgets import (
+    QApplication,
+    QButtonGroup,
+    QFrame,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+from .. import config, dev_install, launcher, platform_hints
+from ..configs import ConfigStore, SavedConfig
+from ..discovery import (
+    Project,
+    ProjectsUnavailable,
+    available_dccs,
+    list_projects,
+    load_bootstrap,
+    newest_variant,
+    show_package,
+    variant_version,
+)
+from ..local_packages import (
+    LocalPackage,
+    LocalPackagesUnavailable,
+    current_user,
+    delete_package,
+    dev_root,
+    list_local_packages,
+    local_root,
+    shadowed_requests,
+)
+from ..parser import Bootstrap
+from .chips import ShowChipBar
+from .collapsible import CollapsibleFrame
+from .config_menu import ConfigMenuAction
+from .dcc_tile import DccTile
+from .favorites_window import FavoritesWindow
+from .flow_layout import FlowLayout
+from .settings_dialog import SettingsDialog
+from .style import STYLESHEET
+
+
+#: Width of a software tile, and therefore the width compact mode aims for --
+#: the whole collapsed window should be no wider than one icon plus padding.
+DCC_TILE_WIDTH = 104
+
+#: Item roles on the local/dev package rows.
+_PACKAGE_NAME_ROLE = Qt.UserRole
+_PACKAGE_PATH_ROLE = Qt.UserRole + 1
+
+#: Shown under the logo in quotes, one at random per launch. Stored unquoted so
+#: the list stays the source of truth for the text itself.
+TAGLINES: tuple[str, ...] = (
+    "Yesterdays Technology. Today.",
+    "Now, where did I put that New Pipeline?",
+    "Because, Fuck You, That's Why.",
+    "Pull yourself up by your Bootstrap.",
+    "If your Grandma had wheels, She would be a Bicycle",
+)
+
+
+def _chevrons(up: bool, size: int = 16) -> QPixmap:
+    """Two stacked chevrons, drawn rather than shipped as an asset file."""
+    scale = 3
+    pixmap = QPixmap(size * scale, size * scale)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    pen = QPen(QColor("#c3cad4"))
+    pen.setWidth(int(1.6 * scale))
+    pen.setCapStyle(Qt.RoundCap)
+    pen.setJoinStyle(Qt.RoundJoin)
+    painter.setPen(pen)
+
+    span = size * scale
+    inset = span * 0.24
+    width = span - inset * 2
+    for index in (0, 1):
+        top = span * (0.26 if index == 0 else 0.54)
+        rise = span * 0.20
+        if up:
+            painter.drawPolyline(
+                [
+                    QPointF(inset, top + rise),
+                    QPointF(inset + width / 2, top),
+                    QPointF(inset + width, top + rise),
+                ]
+            )
+        else:
+            painter.drawPolyline(
+                [
+                    QPointF(inset, top),
+                    QPointF(inset + width / 2, top + rise),
+                    QPointF(inset + width, top),
+                ]
+            )
+    painter.end()
+    return pixmap.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+
+def random_tagline() -> str:
+    """One tagline, curly-quoted for display."""
+    return "\u201c%s\u201d" % random.choice(TAGLINES)
+
+
+def _badge(letter: str, color: str, size: int = 26) -> QPixmap:
+    """A small rounded colour chip with a letter, used as the DCC icon."""
+    scale = 3  # draw big, scale down: cheap antialiasing
+    pixmap = QPixmap(size * scale, size * scale)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setBrush(QColor(color))
+    painter.setPen(Qt.NoPen)
+    painter.drawRoundedRect(
+        pixmap.rect(), 7 * scale, 7 * scale
+    )
+    font = painter.font()
+    # Two- and three-character labels ("HC", "FX", ">_") need to come down a
+    # size or they overflow the chip.
+    shrink = {1: 0.50, 2: 0.36}.get(len(letter), 0.30)
+    font.setPointSizeF(size * scale * shrink)
+    font.setBold(True)
+    painter.setFont(font)
+    painter.setPen(QColor("#15171a"))
+    painter.drawText(pixmap.rect(), Qt.AlignCenter, letter)
+    painter.end()
+    return pixmap.scaled(
+        size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation
+    )
+
+
+class MainWindow(QMainWindow):
+    def __init__(self, store: ConfigStore | None = None) -> None:
+        super().__init__()
+        self.setWindowTitle("BootyCall")
+        self.resize(705, 680)
+        self.setMinimumSize(570, 560)
+
+        self._bootstrap: Bootstrap | None = None
+        self._dcc_buttons: dict[str, DccTile] = {}
+        self._dcc_variants: dict[str, tuple[str, ...]] = {}
+        self._dcc_variant: dict[str, str] = {}
+        self._preferred_dcc: str | None = None
+        self._active_dcc: config.Dcc | None = None
+        self._compact = False
+        self._expanded_size = None
+        self._expanded_minimum = None
+        self._local_packages: list[LocalPackage] = []
+        self._dev_packages: list[LocalPackage] = []
+        self._projects_by_name: dict[str, Project] = {}
+        self._favorites_window: FavoritesWindow | None = None
+        self.store = store if store is not None else ConfigStore()
+        # Before anything reads a path: the stored settings are the outermost
+        # layer, and reload_projects() fires as soon as the window is up.
+        config.set_path_overrides(self.store.path_overrides())
+        self._dcc_variant.update(self.store.variants())
+        self._preferred_dcc = self.store.selected_dcc()
+        self._restore_compact = self.store.compact()
+        stored = self.store.visible_software()
+        self._visible_software: list[str] = list(
+            config.DEFAULT_VISIBLE_SOFTWARE if stored is None else stored
+        )
+
+        self._build_ui()
+        self._build_menu()
+        if self.store.load_error:
+            self.statusBar().showMessage(self.store.load_error, 10000)
+        QTimer.singleShot(0, self.reload_projects)
+        if self._restore_compact:
+            # After the first listing, so the chip and tile it keeps exist.
+            QTimer.singleShot(0, lambda: self.set_compact(True))
+
+    # -- construction ------------------------------------------------------
+
+    def _build_ui(self) -> None:
+        central = QWidget()
+        root = QVBoxLayout(central)
+        self.EXPANDED_MARGINS = (22, 20, 22, 16)
+        self.COMPACT_MARGINS = (10, 8, 10, 8)
+        root.setContentsMargins(*self.EXPANDED_MARGINS)
+        root.setSpacing(14)
+
+        # Header ----------------------------------------------------------
+        title = QLabel("BootyCall")
+        title.setObjectName("title")
+        self.title_label = title
+        self.tagline = QLabel(random_tagline())
+        self.tagline.setObjectName("tagline")
+        subtitle = self.tagline
+        root.addWidget(title)
+        root.addWidget(subtitle)
+
+        # Project picker --------------------------------------------------
+        root.addSpacing(2)
+
+        # One bordered box holding the pinned chips and the entry. The entry
+        # no longer *is* the selection -- it only pins; the selected chip is
+        # what the rest of the window describes.
+        self.chip_bar = ShowChipBar()
+        self.project_field = self.chip_bar.line_edit
+        self.project_field.projectActivated.connect(self._on_show_entered)
+        self.chip_bar.selectionChanged.connect(self._on_chip_selected)
+        self.chip_bar.chipsChanged.connect(self._persist_pinned_shows)
+        root.addWidget(self.chip_bar)
+
+        self.status_label = QLabel("")
+        self.status_label.setObjectName("statusLabel")
+        self.status_label.setWordWrap(True)
+        root.addWidget(self.status_label)
+
+        self.header_separator = self._separator()
+        root.addWidget(self.header_separator)
+
+        # DCC row ---------------------------------------------------------
+        dcc_container = QWidget()
+        self.dcc_row = FlowLayout(dcc_container, margin=0, spacing=10)
+        self.dcc_group = QButtonGroup(self)
+        self.dcc_group.setExclusive(True)
+        self.dcc_group.buttonClicked.connect(self._on_dcc_clicked)
+
+        self.dcc_placeholder = QLabel("Select a show to see what it provides.")
+        self.dcc_placeholder.setObjectName("hint")
+        self.dcc_row.addWidget(self.dcc_placeholder)
+
+        # Terminal and Favourites sit in the same row but outside the exclusive
+        # group: they are actions, not part of the show's software list, and
+        # they stay available whatever is selected.
+        self.terminal_button = QToolButton()
+        self.terminal_button.setObjectName("actionTile")
+        self.terminal_button.setText("Terminal")
+        self.terminal_button.setIcon(_badge(">_", "#6c7a89"))
+        self.terminal_button.setIconSize(QSize(26, 26))
+        self.terminal_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        self.terminal_button.setMinimumWidth(DCC_TILE_WIDTH)
+        self.terminal_button.setToolTip(
+            "Open a shell resolved against the selected package set"
+        )
+        self.terminal_button.setEnabled(False)
+        self.terminal_button.clicked.connect(self._on_open_terminal)
+        self.dcc_row.addWidget(self.terminal_button)
+
+        self.favorites_button = QToolButton()
+        self.favorites_button.setObjectName("moreButton")
+        self.favorites_button.setText("\u22ef")  # midline horizontal ellipsis
+        self.favorites_button.setFixedSize(30, 30)
+        self.favorites_button.setToolTip("Favourites (Ctrl+B)")
+        self.favorites_button.clicked.connect(self.show_favorites)
+        self.dcc_row.addWidget(self.favorites_button)
+
+        root.addWidget(dcc_container)
+
+        root.addSpacing(4)
+
+        # Resolved packages (collapsed by default) -------------------------
+        self.resolve_frame = CollapsibleFrame("Resolved packages", expanded=False)
+        self.resolve_frame.toggled.connect(self._on_frame_toggled)
+        self.package_list = QListWidget()
+        self.package_list.setSelectionMode(QListWidget.ExtendedSelection)
+        self.package_list.setAlternatingRowColors(False)
+        self.package_list.setMinimumHeight(120)
+        self.package_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.resolve_frame.add_widget(self.package_list, 1)
+        root.addWidget(self.resolve_frame)
+        self._resolve_index = root.count() - 1
+
+        # Local packages (collapsed by default) ----------------------------
+        (
+            self.local_frame,
+            self.local_path_label,
+            self.local_list,
+        ) = self._build_package_section("Local packages")
+        root.addWidget(self.local_frame)
+        self._local_index = root.count() - 1
+
+        # Dev packages (collapsed by default) ------------------------------
+        (
+            self.dev_frame,
+            self.dev_path_label,
+            self.dev_list,
+        ) = self._build_package_section("Dev packages")
+        root.addWidget(self.dev_frame)
+        self._dev_index = root.count() - 1
+
+        root.addStretch(0)
+        self._spacer_index = root.count() - 1
+        self._root_layout = root
+
+        # Footer ----------------------------------------------------------
+        footer = QHBoxLayout()
+        footer.setSpacing(10)
+        self._footer = footer
+        self.copy_button = QPushButton("Copy command")
+        self.copy_button.clicked.connect(self._on_copy_command)
+        self.copy_button.setEnabled(False)
+        footer.addWidget(self.copy_button)
+        footer.addStretch(1)
+        self._footer_lead_spacer = footer.itemAt(footer.count() - 1)
+
+        self.compact_button = QToolButton()
+        self.compact_button.setObjectName("compactButton")
+        self.compact_button.setIcon(_chevrons(up=True))
+        self.compact_button.setIconSize(QSize(16, 16))
+        self.compact_button.setFixedSize(34, 34)
+        self.compact_button.setToolTip("Collapse to a compact launcher (Ctrl+M)")
+        self.compact_button.clicked.connect(self.toggle_compact)
+        footer.addWidget(self.compact_button)
+
+        self.launch_button = QPushButton("Launch")
+        self.launch_button.setObjectName("launchButton")
+        self.launch_button.setEnabled(False)
+        self.launch_button.setDefault(True)
+        self.launch_button.clicked.connect(self._on_launch)
+        self.launch_button.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.launch_button.customContextMenuRequested.connect(self._on_launch_menu)
+        footer.addWidget(self.launch_button)
+        root.addLayout(footer)
+
+        self.setCentralWidget(central)
+        self.statusBar().showMessage(config.shows_root())
+        self._apply_frame_stretch()
+
+    def _build_package_section(
+        self, title: str
+    ) -> tuple[CollapsibleFrame, QLabel, QListWidget]:
+        """One collapsed package section: header, root path, list."""
+        frame = CollapsibleFrame(title, expanded=False)
+        frame.toggled.connect(self._on_package_frame_toggled)
+
+        path_label = QLabel("")
+        path_label.setObjectName("hint")
+        path_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        frame.add_widget(path_label)
+
+        listing = QListWidget()
+        listing.setSelectionMode(QListWidget.ExtendedSelection)
+        listing.setMinimumHeight(100)
+        listing.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        listing.setContextMenuPolicy(Qt.CustomContextMenu)
+        listing.customContextMenuRequested.connect(
+            lambda point, lst=listing: self._on_package_menu(lst, point)
+        )
+        frame.add_widget(listing, 1)
+        return frame, path_label, listing
+
+    def _build_menu(self) -> None:
+        self.file_menu = self.menuBar().addMenu("&File")
+        # Rebuilt on open so the list always reflects the store, including
+        # edits made by another BootyCall window.
+        self.file_menu.aboutToShow.connect(self._rebuild_file_menu)
+
+        self.save_action = QAction("&Save current setup...", self)
+        self.save_action.setShortcut(QKeySequence.Save)
+        self.save_action.setEnabled(False)
+        self.save_action.triggered.connect(self._on_save_config)
+        self.addAction(self.save_action)  # keep Ctrl+S live without the menu open
+
+        self.favorites_action = QAction("&Favourites...", self)
+        self.favorites_action.setShortcut(QKeySequence("Ctrl+B"))
+        self.favorites_action.triggered.connect(self.show_favorites)
+        self.addAction(self.favorites_action)
+
+        self.terminal_action = QAction("Open &terminal", self)
+        self.terminal_action.setShortcut(QKeySequence("Ctrl+T"))
+        self.terminal_action.triggered.connect(self._on_open_terminal)
+        self.addAction(self.terminal_action)
+
+        self.reload_action = QAction("&Reload shows", self)
+        self.reload_action.setShortcut(QKeySequence.Refresh)
+        self.reload_action.triggered.connect(self.reload_projects)
+        self.addAction(self.reload_action)
+
+        self.focus_action = QAction("&Find show", self)
+        self.focus_action.setShortcut(QKeySequence.Find)
+        self.focus_action.triggered.connect(self._focus_project_field)
+        self.addAction(self.focus_action)
+
+        self.compact_action = QAction("&Compact mode", self)
+        self.compact_action.setShortcut(QKeySequence("Ctrl+M"))
+        self.compact_action.setCheckable(True)
+        self.compact_action.triggered.connect(self.set_compact)
+        self.addAction(self.compact_action)
+
+        self.settings_action = QAction("&Settings...", self)
+        self.settings_action.setShortcut(QKeySequence.Preferences)
+        self.settings_action.setMenuRole(QAction.PreferencesRole)
+        self.settings_action.triggered.connect(self.show_settings)
+        self.addAction(self.settings_action)
+
+        self.quit_action = QAction("&Quit", self)
+        self.quit_action.setShortcut(QKeySequence.Quit)
+        self.quit_action.triggered.connect(self.close)
+
+        self._config_actions: list[ConfigMenuAction] = []
+        self._rebuild_file_menu()
+        self._build_software_menu()
+
+    def _build_software_menu(self) -> None:
+        """Checkboxes for which DCCs get a tile.
+
+        The registry knows about seven; four are shown out of the box. The rest
+        are real but rarely wanted, and a row of nine tiles buries the ones
+        people actually reach for -- so they live behind a toggle rather than
+        being dropped from the registry.
+        """
+        # A top-level Settings entry as well as the File one: paths are the
+        # thing people go looking for, and burying them under File hides them.
+        settings_menu = self.menuBar().addMenu("Se&ttings")
+        settings_menu.addAction(self.settings_action)
+
+        self.software_menu = self.menuBar().addMenu("&Software")
+        self._software_actions: dict[str, QAction] = {}
+
+        for dcc in config.DCCS:
+            action = QAction(dcc.label, self)
+            action.setCheckable(True)
+            action.setChecked(dcc.name in self._visible_software)
+            action.toggled.connect(
+                lambda checked, name=dcc.name: self._on_software_toggled(
+                    name, checked
+                )
+            )
+            self.software_menu.addAction(action)
+            self._software_actions[dcc.name] = action
+
+        self.software_menu.addSeparator()
+        reset = QAction("Reset to defaults", self)
+        reset.triggered.connect(self._on_reset_software)
+        self.software_menu.addAction(reset)
+
+    def _on_software_toggled(self, name: str, checked: bool) -> None:
+        if checked and name not in self._visible_software:
+            # Keep registry order rather than click order, so the row does not
+            # reshuffle depending on what you turned on first.
+            order = [d.name for d in config.DCCS]
+            self._visible_software.append(name)
+            self._visible_software.sort(key=order.index)
+        elif not checked and name in self._visible_software:
+            self._visible_software.remove(name)
+
+        error = self.store.set_visible_software(self._visible_software)
+        if error:
+            self.statusBar().showMessage(error, 8000)
+        self._reapply_software()
+
+    def _on_reset_software(self) -> None:
+        self._visible_software = list(config.DEFAULT_VISIBLE_SOFTWARE)
+        self.store.set_visible_software(None)
+        for dcc_name, action in self._software_actions.items():
+            action.blockSignals(True)
+            action.setChecked(dcc_name in self._visible_software)
+            action.blockSignals(False)
+        self._reapply_software()
+
+    def _reapply_software(self) -> None:
+        """Redraw the software row for the current show."""
+        project = self.current_project()
+        if project is None:
+            return
+        self._on_project_changed(project)
+
+    # -- saved setups ------------------------------------------------------
+
+    def _rebuild_file_menu(self) -> None:
+        """Redraw the File menu from the store.
+
+        Cheap enough to do on every open, which keeps this the single place
+        that knows the menu's shape.
+        """
+        menu = self.file_menu
+        menu.clear()
+        self._config_actions = []
+
+        menu.addAction(self.save_action)
+        menu.addAction(self.favorites_action)
+        menu.addAction(self.terminal_action)
+        menu.addSeparator()
+
+        header = QAction("Saved setups", self)
+        header.setEnabled(False)
+        menu.addAction(header)
+
+        if not len(self.store):
+            empty = QAction("   Nothing saved yet", self)
+            empty.setEnabled(False)
+            menu.addAction(empty)
+        else:
+            for saved in self.store.configs():
+                action = ConfigMenuAction(saved, menu)
+                action.applied.connect(self._on_apply_config)
+                action.removed.connect(self._on_remove_config)
+                menu.addAction(action)
+                self._config_actions.append(action)
+
+        menu.addSeparator()
+        menu.addAction(self.reload_action)
+        menu.addAction(self.focus_action)
+        menu.addAction(self.compact_action)
+        menu.addSeparator()
+        menu.addAction(self.settings_action)
+        menu.addAction(self.quit_action)
+
+    def _current_state(self) -> tuple[Project, config.Dcc, str] | None:
+        """The (show, dcc, tool) triple a config is made of, if complete."""
+        project = self.current_project()
+        tool = self._current_tool()
+        if project is None or self._active_dcc is None or tool is None:
+            return None
+        return project, self._active_dcc, tool
+
+    def _on_save_config(self) -> None:
+        state = self._current_state()
+        if state is None:
+            self.statusBar().showMessage(
+                "Pick a show and a tool before saving a setup", 5000
+            )
+            return
+        project, dcc, tool = state
+
+        suggested = self.store.suggest_name(project.name, dcc.label_for(tool))
+        name, accepted = QInputDialog.getText(
+            self, "Save setup", "Name this setup:", text=suggested
+        )
+        name = name.strip()
+        if not accepted or not name:
+            return
+
+        if self.store.get(name) is not None:
+            reply = QMessageBox.question(
+                self,
+                "Replace setup",
+                "A setup named '%s' already exists. Replace it?" % name,
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+        error = self.store.add(
+            SavedConfig(name=name, show=project.name, dcc=dcc.name, tool=tool)
+        )
+        self._rebuild_file_menu()
+        if self._favorites_window is not None:
+            self._favorites_window.refresh()
+        if error:
+            QMessageBox.warning(self, "Setup not saved", error)
+            return
+        self.statusBar().showMessage("Saved setup '%s'" % name, 5000)
+
+    def _on_remove_config(self, name: str) -> None:
+        error = self.store.remove(name)
+        # Drop just this row so the open menu keeps its place and several can
+        # be cleared in one visit.
+        for action in list(self._config_actions):
+            if action.config.name != name:
+                continue
+            self.file_menu.removeAction(action)
+            self._config_actions.remove(action)
+            action.deleteLater()
+            break
+
+        if not self._config_actions and self.file_menu.isVisible():
+            self.file_menu.close()
+
+        if self._favorites_window is not None:
+            self._favorites_window.refresh()
+        if error:
+            QMessageBox.warning(self, "Setup not removed", error)
+            return
+        self.statusBar().showMessage("Removed setup '%s'" % name, 5000)
+
+    def _on_apply_config(self, name: str) -> None:
+        saved = self.store.get(name)
+        if saved is None:
+            return
+
+        if saved.show not in self._projects_by_name:
+            self._set_status(
+                "Setup '%s' points at show '%s', which is no longer in %s"
+                % (name, saved.show, config.shows_root()),
+                "error",
+            )
+            return
+
+        # Loading a favourite pins its show if it is not pinned already: the
+        # favourite is a stronger statement of intent than the chip row.
+        self.chip_bar.add(saved.show)
+        QApplication.processEvents()
+
+        button = self._dcc_buttons.get(saved.dcc)
+        if button is None:
+            self._set_status(
+                "Setup '%s': %s does not offer %s any more"
+                % (name, saved.show, saved.dcc),
+                "error",
+            )
+            return
+        button.click()
+
+        if saved.tool not in self._dcc_variants.get(saved.dcc, ()):
+            self._set_status(
+                "Setup '%s': '%s' is no longer defined for %s"
+                % (name, saved.tool, saved.show),
+                "error",
+            )
+            return
+        self.set_variant(saved.dcc, saved.tool)
+        self.statusBar().showMessage("Loaded setup '%s'" % name, 5000)
+
+    @staticmethod
+    def _separator() -> QFrame:
+        line = QFrame()
+        line.setFrameShape(QFrame.HLine)
+        line.setFixedHeight(1)
+        line.setStyleSheet("background: #2c3037; border: none;")
+        return line
+
+    def current_project(self) -> Project | None:
+        """The show the window is describing: whichever chip is selected."""
+        name = self.chip_bar.selected_name()
+        if name is None:
+            return None
+        return self._projects_by_name.get(name)
+
+    # -- pinned shows ------------------------------------------------------
+
+    def _on_show_entered(self, project: Project) -> None:
+        """Enter in the autocomplete field: pin the show and select it."""
+        added = self.chip_bar.add(project.name)
+        self.project_field.clear()
+        self.project_field.setFocus()
+        if not added:
+            self.statusBar().showMessage(
+                "%s is already pinned" % project.name, 4000
+            )
+
+    def _on_chip_selected(self, name: object) -> None:
+        self.store.set_selected_show(name if isinstance(name, str) else None)
+        self._on_project_changed(self.current_project())
+        if self._compact:
+            self._apply_compact_filter()
+
+    def _persist_pinned_shows(self) -> None:
+        error = self.store.set_pinned_shows(self.chip_bar.names())
+        if error:
+            self.statusBar().showMessage(error, 8000)
+
+    def _restore_pinned_shows(self) -> None:
+        """Re-pin what was there last time, dropping shows that have gone."""
+        pinned = list(self.store.pinned_shows())
+        if not pinned:
+            self.chip_bar.set_names([], None)
+            return
+
+        alive = [n for n in pinned if n in self._projects_by_name]
+        missing = [n for n in pinned if n not in self._projects_by_name]
+
+        self.chip_bar.set_names(alive, self.store.selected_show())
+
+        if missing:
+            # Silently dropping a pin would look like the app lost it.
+            self._persist_pinned_shows()
+            self.statusBar().showMessage(
+                "Unpinned %s - no longer in %s"
+                % (", ".join(missing), config.shows_root()),
+                10000,
+            )
+
+    # -- data --------------------------------------------------------------
+
+    def reload_projects(self) -> None:
+        self.refresh_package_lists()
+        try:
+            projects = list_projects()
+        except ProjectsUnavailable as exc:
+            self._projects_by_name = {}
+            self.project_field.set_projects([])
+            self.chip_bar.set_names([], None)
+            self._set_status(str(exc), "error")
+            return
+
+        self._projects_by_name = {p.name: p for p in projects}
+        self.project_field.set_projects(projects)
+        self.statusBar().showMessage(
+            "%s  -  %d shows" % (config.shows_root(), len(projects))
+        )
+        if not projects:
+            self._set_status("No shows found in %s" % config.shows_root(), "error")
+        else:
+            self._set_status("")
+        self._restore_pinned_shows()
+        self._focus_project_field()
+
+    def _focus_project_field(self) -> None:
+        self.project_field.setFocus()
+        self.project_field.selectAll()
+
+    # -- reactions ---------------------------------------------------------
+
+    def _on_project_changed(self, project: Project | None) -> None:
+        self._clear_dccs()
+        self._bootstrap = None
+        self.package_list.clear()
+        self.resolve_frame.set_badge("")
+        self.resolve_frame.set_note("")
+        self._refresh_override_marks()
+        self._update_actions()
+
+        if project is None:
+            self._set_status("")
+            return
+
+        bootstrap, message = load_bootstrap(project)
+        if bootstrap is None:
+            self._set_status(message, "error")
+            return
+
+        self._bootstrap = bootstrap
+        entries = available_dccs(bootstrap)
+        if not entries:
+            self._set_status(
+                "%s  -  none of %s are configured for this show"
+                % (message, " / ".join(d.label for d in config.DCCS)),
+                "error",
+            )
+            return
+
+        hidden = [d.label for d, _ in entries if d.name not in self._visible_software]
+        shown = [e for e in entries if e[0].name in self._visible_software]
+
+        if not shown:
+            # Defined but switched off. Saying "not configured" here would be a
+            # lie, and would send someone to edit the bootstrap for no reason.
+            self._set_status(
+                "%s  -  this show offers %s, all hidden. Turn them on in the "
+                "Software menu." % (message, ", ".join(hidden)),
+                "error",
+            )
+            return
+
+        # Nothing to say when it worked: the tiles and the section badges are
+        # the report. Only the failures below still speak up.
+        self._set_status("")
+        self._populate_dccs(entries)
+
+    def _populate_dccs(self, entries: list[tuple[config.Dcc, tuple[str, ...]]]) -> None:
+        for dcc, keys in entries:
+            if dcc.name not in self._visible_software:
+                continue
+            self.dcc_placeholder.hide()
+            button = DccTile(dcc.name)
+            button.setCheckable(True)
+            button.setText(dcc.label)
+            button.setIcon(_badge(dcc.icon_text, dcc.accent))
+            button.setIconSize(QSize(26, 26))
+            button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+            button.setMinimumWidth(DCC_TILE_WIDTH)
+            button.variantMenuRequested.connect(self._on_variant_menu)
+
+            self._dcc_variants[dcc.name] = keys
+            # Newest by default; a variant the user picked earlier for this DCC
+            # only survives if this show still offers it.
+            chosen = self._dcc_variant.get(dcc.name)
+            if chosen not in keys:
+                chosen = newest_variant(self._bootstrap, dcc, keys)
+            self._dcc_variant[dcc.name] = chosen
+
+            self._dcc_buttons[dcc.name] = button
+            self._refresh_tile(dcc)
+            self.dcc_group.addButton(button)
+            # Before the Terminal and Favourites tiles, which stay last.
+            self.dcc_row.insertWidget(self.dcc_row.count() - 2, button)
+
+        shown = [(d, k) for d, k in entries if d.name in self._visible_software]
+        if shown:
+            # Stay on the software you were using where the new show offers it,
+            # so flicking between shows does not keep dumping you back on the
+            # first tile.
+            chosen = next(
+                (d for d, _k in shown if d.name == self._preferred_dcc),
+                shown[0][0],
+            )
+            self._dcc_buttons[chosen.name].setChecked(True)
+            self._activate_dcc(chosen)
+
+    def _clear_dccs(self) -> None:
+        for button in self._dcc_buttons.values():
+            self.dcc_group.removeButton(button)
+            self.dcc_row.removeWidget(button)
+            # setParent(None) as well as deleteLater: taking a widget out of a
+            # layout does not unmap it, so without this the old tiles keep
+            # painting at their last geometry until the deferred delete runs,
+            # and a show with fewer tiles shows the previous show's underneath.
+            button.setParent(None)
+            button.deleteLater()
+        self._dcc_buttons.clear()
+        self._dcc_variants.clear()
+        self._active_dcc = None
+        self.dcc_placeholder.show()
+
+    def _on_dcc_clicked(self, button: DccTile) -> None:
+        dcc = config.dcc_by_name(button.dcc_name)
+        if dcc is not None:
+            self._preferred_dcc = dcc.name
+            self._activate_dcc(dcc)
+
+    def _activate_dcc(self, dcc: config.Dcc) -> None:
+        self._active_dcc = dcc
+        tool = self._dcc_variant.get(dcc.name)
+        if tool:
+            self._show_packages(tool)
+        if self._compact:
+            self._apply_compact_filter()
+        self._update_actions()
+
+    def _variant_subtitle(self, dcc: config.Dcc, key: str) -> str:
+        """The grey line under a tile's name: the variant's version.
+
+        Falls back to a short tag, and then to the variant label, because a
+        version is only useful if the bootstrap actually names one -- and where
+        two variants share a version the number alone would not say which is
+        selected.
+        """
+        if self._bootstrap is None:
+            return ""
+        keys = self._dcc_variants.get(dcc.name, ())
+        version = variant_version(
+            self._bootstrap.packages.get(key, ()), dcc.version_package
+        )
+        tag = dcc.variant_tags.get(key, "")
+
+        if version:
+            others = [
+                variant_version(
+                    self._bootstrap.packages.get(k, ()), dcc.version_package
+                )
+                for k in keys
+            ]
+            if others.count(version) > 1 and tag:
+                return "%s \u00b7 %s" % (version, tag)
+            return version
+        return tag or dcc.label_for(key)
+
+    def _refresh_tile(self, dcc: config.Dcc) -> None:
+        button = self._dcc_buttons.get(dcc.name)
+        if button is None:
+            return
+        keys = self._dcc_variants.get(dcc.name, ())
+        key = self._dcc_variant.get(dcc.name, "")
+        button.set_subtitle(self._variant_subtitle(dcc, key))
+
+        if len(keys) > 1:
+            tip = "%s - %s\n\nRight-click for %d variants" % (
+                dcc.label,
+                dcc.label_for(key),
+                len(keys),
+            )
+        else:
+            tip = "%s - %s" % (dcc.label, dcc.label_for(key))
+        button.setToolTip(tip)
+
+    def _on_variant_menu(self, tile: DccTile, point) -> None:
+        dcc = config.dcc_by_name(tile.dcc_name)
+        if dcc is None:
+            return
+        keys = self._dcc_variants.get(dcc.name, ())
+        if len(keys) < 2:
+            return  # nothing to choose between
+
+        current = self._dcc_variant.get(dcc.name)
+        menu = QMenu(self)
+        actions = {}
+        for key in keys:
+            version = self._variant_subtitle(dcc, key)
+            label = dcc.label_for(key)
+            if version and version not in label:
+                label = "%s   (%s)" % (label, version)
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(key == current)
+            actions[action] = key
+
+        chosen = menu.exec(tile.mapToGlobal(point))
+        if chosen in actions:
+            self.set_variant(dcc.name, actions[chosen])
+
+    def set_variant(self, dcc_name: str, key: str) -> None:
+        """Choose a variant for one DCC, selecting that DCC as a side effect."""
+        dcc = config.dcc_by_name(dcc_name)
+        if dcc is None or key not in self._dcc_variants.get(dcc_name, ()):
+            return
+        self._dcc_variant[dcc_name] = key
+        self._preferred_dcc = dcc_name
+        self._refresh_tile(dcc)
+
+        button = self._dcc_buttons.get(dcc_name)
+        if button is not None and not button.isChecked():
+            # Picking a variant is a statement about which tool you want, so it
+            # selects the tile too rather than quietly editing a tile you are
+            # not looking at.
+            button.setChecked(True)
+        self._activate_dcc(dcc)
+
+    def _show_packages(self, key: str) -> None:
+        self.package_list.clear()
+        if self._bootstrap is None:
+            self.resolve_frame.set_badge("")
+            self.resolve_frame.set_note("")
+            self._refresh_override_marks()
+            return
+
+        packages = self._bootstrap.packages.get(key, ())
+        local_hits = shadowed_requests(self._local_packages, packages)
+        dev_hits = shadowed_requests(self._dev_packages, packages)
+        shadowed: dict[str, list[str]] = {}
+        for request in local_hits.values():
+            shadowed.setdefault(request, []).append("local")
+        for request in dev_hits.values():
+            shadowed.setdefault(request, []).append("dev")
+
+        seen: set[str] = set()
+        for request in packages:
+            duplicate = request in seen
+            seen.add(request)
+            item = QListWidgetItem(request)
+            tips = []
+            if duplicate:
+                item.setForeground(QColor("#7c828d"))
+                tips.append("Listed more than once in this package set")
+            roots = shadowed.get(request)
+            if roots:
+                item.setText(
+                    "%s      overridden by your %s build%s"
+                    % (request, " and ".join(roots), "s" if len(roots) > 1 else "")
+                )
+                item.setForeground(QColor("#e0a23c"))
+                tips.append(
+                    "A package named '%s' exists in your %s root%s and takes "
+                    "precedence over this request."
+                    % (
+                        request.split("-", 1)[0],
+                        " and ".join(roots),
+                        "s" if len(roots) > 1 else "",
+                    )
+                )
+                if len(roots) > 1:
+                    # Which of the two wins depends on REZ_PACKAGES_PATH order
+                    # at your site, which BootyCall cannot see -- so say both
+                    # rather than pick one and be wrong half the time.
+                    tips.append(
+                        "It is in both roots; which one wins depends on your "
+                        "REZ_PACKAGES_PATH order."
+                    )
+            if tips:
+                item.setToolTip("\n".join(tips))
+            self.package_list.addItem(item)
+
+        duplicates = len(packages) - len(seen)
+        badge = "%s  -  %d packages" % (key, len(packages))
+        if duplicates:
+            badge += "  (%d duplicate)" % duplicates
+        self.resolve_frame.set_badge(badge)
+        self.resolve_frame.set_note(
+            "%d overridden locally" % len(shadowed) if shadowed else "",
+            "warn" if shadowed else "",
+        )
+        if self._active_dcc is not None:
+            self._refresh_tile(self._active_dcc)
+        self._refresh_override_marks()
+
+    # -- local and dev packages --------------------------------------------
+
+    def refresh_package_lists(self) -> None:
+        """Rescan both per-user roots and repaint their sections."""
+        self._local_packages = self._fill_package_section(
+            frame=self.local_frame,
+            path_label=self.local_path_label,
+            listing=self.local_list,
+            root=local_root(),
+            exclude=None,
+            empty_hint="No local packages yet - nothing here overrides your resolve.",
+        )
+        self._dev_packages = self._fill_package_section(
+            frame=self.dev_frame,
+            path_label=self.dev_path_label,
+            listing=self.dev_list,
+            root=dev_root(),
+            exclude=(),
+            empty_hint="No dev packages yet - nothing here overrides your resolve.",
+        )
+
+        # The resolve list marks overrides, so it has to be redrawn too.
+        tool = self._current_tool()
+        if tool and self._bootstrap is not None:
+            self._show_packages(tool)
+        else:
+            self._refresh_override_marks()
+
+    def _fill_package_section(
+        self,
+        frame: CollapsibleFrame,
+        path_label: QLabel,
+        listing: QListWidget,
+        root,
+        exclude,
+        empty_hint: str,
+    ) -> list[LocalPackage]:
+        """Scan one root and paint its section. Returns what it found."""
+        path_label.setText("%s   (user: %s)" % (root, current_user()))
+
+        error = ""
+        try:
+            packages = list_local_packages(root, exclude=exclude)
+        except LocalPackagesUnavailable as exc:
+            packages = []
+            error = str(exc)
+
+        listing.clear()
+
+        if error:
+            frame.set_badge("")
+            frame.set_note("unreadable", "error")
+            item = QListWidgetItem(error)
+            item.setForeground(QColor("#e06c75"))
+            listing.addItem(item)
+        elif not root.exists():
+            frame.set_badge("none")
+            frame.set_note("")
+            item = QListWidgetItem(empty_hint)
+            item.setForeground(QColor("#7c828d"))
+            item.setToolTip("Expected at %s" % root)
+            listing.addItem(item)
+        elif not packages:
+            frame.set_badge("none")
+            frame.set_note("")
+            item = QListWidgetItem(empty_hint)
+            item.setForeground(QColor("#7c828d"))
+            listing.addItem(item)
+        else:
+            frame.set_badge("%d packages" % len(packages))
+            for package in packages:
+                item = QListWidgetItem(package.request)
+                item.setData(_PACKAGE_NAME_ROLE, package.name)
+                item.setData(_PACKAGE_PATH_ROLE, str(package.path))
+                item.setToolTip("%s\n%s" % (package.path, package.definition))
+                listing.addItem(item)
+
+        return packages
+
+    # -- package context menu ----------------------------------------------
+
+    def _section_for(self, listing: QListWidget):
+        """The (packages, root, label) behind one of the two package lists."""
+        if listing is self.dev_list:
+            return self._dev_packages, dev_root(), "dev"
+        return self._local_packages, local_root(), "local"
+
+    def _packages_for_items(self, listing: QListWidget, items) -> list[LocalPackage]:
+        packages, _root, _label = self._section_for(listing)
+        by_path = {str(p.path): p for p in packages}
+        found = []
+        for item in items:
+            package = by_path.get(item.data(_PACKAGE_PATH_ROLE) or "")
+            if package is not None:
+                found.append(package)
+        return found
+
+    def _on_package_menu(self, listing: QListWidget, point) -> None:
+        clicked = listing.itemAt(point)
+        if clicked is None or not clicked.data(_PACKAGE_PATH_ROLE):
+            return  # a placeholder or error row, not a package
+
+        selected = [i for i in listing.selectedItems() if i.data(_PACKAGE_PATH_ROLE)]
+        # Right-clicking outside the selection targets what was clicked, which
+        # is what every other list in the world does.
+        items = selected if clicked in selected else [clicked]
+        packages = self._packages_for_items(listing, items)
+        if not packages:
+            return
+
+        count = len(packages)
+        menu = QMenu(self)
+        browse_action = menu.addAction(
+            "Browse folder" if count == 1 else "Browse %d folders" % count
+        )
+        copy_action = menu.addAction(
+            "Copy path" if count == 1 else "Copy %d paths" % count
+        )
+        menu.addSeparator()
+        delete_action = menu.addAction(
+            "Delete from disk"
+            if count == 1
+            else "Delete %d packages from disk" % count
+        )
+
+        chosen = menu.exec(listing.mapToGlobal(point))
+        if chosen is browse_action:
+            self.browse_packages(packages)
+        elif chosen is copy_action:
+            QApplication.clipboard().setText(
+                "\n".join(str(p.path) for p in packages)
+            )
+            self.statusBar().showMessage(
+                "Copied %d path%s" % (count, "" if count == 1 else "s"), 4000
+            )
+        elif chosen is delete_action:
+            self._confirm_delete_packages(listing, packages)
+
+    def browse_packages(self, packages: list[LocalPackage]) -> list[str]:
+        """Open each package folder in the desktop's file manager.
+
+        Returns the failures. Opening a handful at once is the point -- you are
+        usually comparing two builds -- but a dozen windows is not, so this
+        stops at a sane number rather than carpeting the desktop.
+        """
+        limit = 5
+        errors: list[str] = []
+        for package in packages[:limit]:
+            if not package.path.is_dir():
+                errors.append("%s is no longer there" % package.path)
+                continue
+            if not QDesktopServices.openUrl(
+                QUrl.fromLocalFile(str(package.path))
+            ):
+                errors.append("no file manager would open %s" % package.path)
+
+        if len(packages) > limit:
+            errors.append(
+                "opened the first %d of %d; the rest were skipped"
+                % (limit, len(packages))
+            )
+        if errors:
+            self.statusBar().showMessage(errors[0], 8000)
+        else:
+            self.statusBar().showMessage(
+                "Opened %d folder%s"
+                % (len(packages), "" if len(packages) == 1 else "s"),
+                4000,
+            )
+        return errors
+
+    def _confirm_delete_packages(
+        self, listing: QListWidget, packages: list[LocalPackage]
+    ) -> None:
+        shown = [str(p.path) for p in packages[:8]]
+        if len(packages) > len(shown):
+            shown.append("... and %d more" % (len(packages) - len(shown)))
+
+        reply = QMessageBox.warning(
+            self,
+            "Delete from disk",
+            "Permanently delete %d package%s?\n\n%s\n\nThis cannot be undone."
+            % (
+                len(packages),
+                "" if len(packages) == 1 else "s",
+                "\n".join(shown),
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,  # destructive: never the default
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        errors = self.delete_packages(listing, packages)
+        if errors:
+            QMessageBox.warning(
+                self,
+                "Not everything was deleted",
+                "Deleted %d of %d.\n\n%s"
+                % (len(packages) - len(errors), len(packages), "\n".join(errors)),
+            )
+
+    def delete_packages(
+        self, listing: QListWidget, packages: list[LocalPackage]
+    ) -> list[str]:
+        """Delete without asking, and return the errors.
+
+        Deliberately free of dialogs: the confirmation and the failure report
+        both live in the caller, so this stays callable from a test without a
+        modal blocking it.
+        """
+        _packages, root, label = self._section_for(listing)
+        errors = [e for e in (delete_package(p, root) for p in packages) if e]
+
+        self.refresh_package_lists()
+
+        deleted = len(packages) - len(errors)
+        if errors:
+            self.statusBar().showMessage(errors[0], 8000)
+        if deleted:
+            self.statusBar().showMessage(
+                "Deleted %d %s package%s"
+                % (deleted, label, "" if deleted == 1 else "s"),
+                6000,
+            )
+        return errors
+
+    def _refresh_override_marks(self) -> None:
+        """Flag packages in either root that shadow the current resolve."""
+        tool = self._current_tool()
+        requests = ()
+        if self._bootstrap is not None and tool:
+            requests = self._bootstrap.packages.get(tool, ())
+
+        for listing, frame, packages in (
+            (self.local_list, self.local_frame, self._local_packages),
+            (self.dev_list, self.dev_frame, self._dev_packages),
+        ):
+            overrides = shadowed_requests(packages, requests)
+
+            # Each list is newest-first per name, and rez resolves the highest
+            # version that satisfies the request, so only the first entry for a
+            # given name actually wins. Marking all three of someone's
+            # nuke_utils builds would say the opposite of what happens.
+            marked: set[str] = set()
+            for row in range(listing.count()):
+                item = listing.item(row)
+                name = item.data(_PACKAGE_NAME_ROLE)
+                if not name:
+                    continue
+                request = overrides.get(name)
+                base = item.text().split("      ")[0]
+                if request and name not in marked:
+                    marked.add(name)
+                    item.setText("%s      overrides %s" % (base, request))
+                    item.setForeground(QColor("#e0a23c"))
+                    item.setToolTip(
+                        "%s\nHighest version of '%s' in this root, so this is "
+                        "the one that replaces the show's '%s'."
+                        % (item.toolTip().split("\n")[0], name, request)
+                    )
+                elif request:
+                    item.setText("%s      (older build)" % base)
+                    item.setForeground(QColor("#7c828d"))
+                else:
+                    item.setText(base)
+                    item.setForeground(QColor("#d7dae0"))
+
+            if packages:
+                frame.set_note(
+                    "%d in use" % len(overrides) if overrides else "",
+                    "warn" if overrides else "",
+                )
+
+    def _on_frame_toggled(self, _expanded: bool) -> None:
+        self._apply_frame_stretch()
+
+    def _on_package_frame_toggled(self, expanded: bool) -> None:
+        if expanded:
+            # Cheap scandir, and it means the lists are never stale on open.
+            self.refresh_package_lists()
+        self._apply_frame_stretch()
+
+    def _apply_frame_stretch(self) -> None:
+        """Give vertical space only to sections that are open."""
+        resolve_open = self.resolve_frame.is_expanded()
+        local_open = self.local_frame.is_expanded()
+        dev_open = self.dev_frame.is_expanded()
+        self._root_layout.setStretch(self._resolve_index, 2 if resolve_open else 0)
+        self._root_layout.setStretch(self._local_index, 1 if local_open else 0)
+        self._root_layout.setStretch(self._dev_index, 1 if dev_open else 0)
+        self._root_layout.setStretch(
+            self._spacer_index,
+            0 if (resolve_open or local_open or dev_open) else 1,
+        )
+        self._grow_to_fit()
+
+    def _grow_to_fit(self, remaining_passes: int = 2) -> None:
+        """Make room for a section that was just opened.
+
+        Only ever grows: shrinking on collapse would undo a size the user chose
+        deliberately. Opening both sections in a short window would otherwise
+        squash both lists to a single row.
+
+        Re-runs itself on the next event-loop turn because the resize only
+        reaches the layout afterwards -- opening both sections at once needs
+        more than one pass to settle.
+        """
+        central = self.centralWidget()
+        if central is None or central.layout() is None:
+            return
+        # The layout's minimumSize is the only figure that respects the lists'
+        # explicit setMinimumHeight; sizeHint and minimumSizeHint both ignore
+        # it, and a QListWidget's own hint is far too small to be useful.
+        central.layout().activate()
+        deficit = central.layout().minimumSize().height() - central.height()
+        if deficit <= 0:
+            return
+        wanted = self.height() + deficit
+        screen = self.screen()
+        if screen is not None:
+            wanted = min(wanted, screen.availableGeometry().height() - 60)
+        if wanted > self.height():
+            self.resize(self.width(), wanted)
+            if remaining_passes > 0:
+                QTimer.singleShot(
+                    0, lambda: self._grow_to_fit(remaining_passes - 1)
+                )
+
+    # -- actions -----------------------------------------------------------
+
+    def _current_tool(self) -> str | None:
+        if self._active_dcc is None:
+            return None
+        return self._dcc_variant.get(self._active_dcc.name) or None
+
+    def _update_actions(self) -> None:
+        ready = (
+            self.current_project() is not None
+            and self._bootstrap is not None
+            and self._current_tool() is not None
+        )
+        self.launch_button.setEnabled(ready)
+        self.copy_button.setEnabled(ready)
+        self.save_action.setEnabled(ready)
+        self.terminal_button.setEnabled(ready)
+
+    def _on_copy_command(self) -> None:
+        project = self.current_project()
+        tool = self._current_tool()
+        if project is None or tool is None:
+            return
+        command = launcher.command_preview(project, tool)
+        QApplication.clipboard().setText(command)
+        self.statusBar().showMessage("Copied: %s" % command, 5000)
+
+    # -- terminal ----------------------------------------------------------
+
+    def terminal_packages(self) -> tuple[str, ...]:
+        """The request list a shell should be resolved against.
+
+        The show's own ``show_<name>`` package is appended when the directory
+        exists, because the bootstrap adds it to every resolve -- leaving it out
+        would hand you a shell subtly unlike the one the DCC gets.
+        """
+        project = self.current_project()
+        tool = self._current_tool()
+        if project is None or self._bootstrap is None or tool is None:
+            return ()
+        packages = tuple(self._bootstrap.packages.get(tool, ()))
+        show_pkg = show_package(project)
+        if show_pkg:
+            packages += (show_pkg,)
+        return packages
+
+    def _on_open_terminal(self) -> None:
+        project = self.current_project()
+        packages = self.terminal_packages()
+        if project is None or not packages:
+            self.statusBar().showMessage(
+                "Pick a show and a tool first - the shell needs a package set", 5000
+            )
+            return
+        try:
+            launcher.open_terminal(project, packages)
+        except OSError as exc:
+            QMessageBox.critical(
+                self,
+                "Could not open a terminal",
+                "%s\n\nCommand:\n%s"
+                % (exc, launcher.terminal_preview(project, packages)),
+            )
+            return
+        self.statusBar().showMessage(
+            "Opened a shell for %s (%d packages)" % (project.name, len(packages)),
+            8000,
+        )
+
+    def raise_to_front(self) -> None:
+        """Called when a second launch asks the running instance to show."""
+        if self.isMinimized():
+            self.showNormal()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    # -- compact mode ------------------------------------------------------
+
+    def is_compact(self) -> bool:
+        return self._compact
+
+    def toggle_compact(self) -> None:
+        self.set_compact(not self._compact)
+
+    def set_compact(self, compact: bool) -> None:
+        """Collapse to show, software and Launch -- or restore.
+
+        Everything else is hidden rather than removed, so the expanded window
+        comes back exactly as it was, open sections and all.
+        """
+        compact = bool(compact)
+        if compact == self._compact:
+            return
+
+        if compact:
+            self._expanded_size = self.size()
+            self._expanded_minimum = self.minimumSize()
+        elif self._expanded_size is None:
+            self._expanded_size = QSize(705, 680)
+            self._expanded_minimum = QSize(570, 560)
+
+        self._compact = compact
+        self.compact_button.setIcon(_chevrons(up=not compact))
+        self.compact_action.setChecked(compact)
+        self.compact_button.setToolTip(
+            "Back to the full window (Ctrl+M)"
+            if compact
+            else "Collapse to a compact launcher (Ctrl+M)"
+        )
+
+        for widget in (
+            self.title_label,
+            self.tagline,
+            self.header_separator,
+            self.resolve_frame,
+            self.local_frame,
+            self.dev_frame,
+            self.copy_button,
+            self.terminal_button,
+            self.favorites_button,
+        ):
+            widget.setVisible(not compact)
+        self.menuBar().setVisible(not compact)
+        self.statusBar().setVisible(not compact)
+        if self.status_label.text():
+            self.status_label.setVisible(not compact)
+
+        # Buttons hug the left in compact, so the window can be as narrow as
+        # the tile rather than as wide as a right-justified footer needs.
+        # Collapse the leading spacer rather than zeroing its stretch factor:
+        # a stretch spacer keeps an Expanding policy, and when every factor is
+        # zero QBoxLayout still shares leftover space among expanding items --
+        # so the spacer would eat the width the button is meant to take.
+        self._footer_lead_spacer.changeSize(
+            0,
+            0,
+            QSizePolicy.Fixed if compact else QSizePolicy.Expanding,
+            QSizePolicy.Minimum,
+        )
+        self._footer.invalidate()
+        self._footer.setSpacing(6 if compact else 10)
+
+        # Compact: the button takes the width the chevron leaves, so its right
+        # edge lands on the tile's. A trailing stretch would left-justify the
+        # pair but leave a ragged gap under the tile instead.
+        self.launch_button.setSizePolicy(
+            QSizePolicy.Expanding if compact else QSizePolicy.Minimum,
+            QSizePolicy.Fixed,
+        )
+        # Fusion gives buttons a generous minimum width of its own; without
+        # overriding it the footer, not the tile, would set the window width
+        # and the two right edges would miss each other by a few pixels.
+        self.launch_button.setMinimumWidth(40 if compact else 0)
+
+        # "Launch" plus its padding is wider than a tile on its own; "GO!" and
+        # the tighter padding below fit beside the chevron inside one tile.
+        self.launch_button.setText("GO!" if compact else "Launch")
+        self.launch_button.setProperty("compact", compact)
+        self.launch_button.style().unpolish(self.launch_button)
+        self.launch_button.style().polish(self.launch_button)
+
+        # Show codes are longer than a tile; elide rather than let one chip set
+        # the width of the whole collapsed window.
+        self.chip_bar.set_chip_max_width(
+            DCC_TILE_WIDTH - 12 if compact else None
+        )
+        self._root_layout.setContentsMargins(
+            *(self.COMPACT_MARGINS if compact else self.EXPANDED_MARGINS)
+        )
+        self._root_layout.setSpacing(8 if compact else 14)
+
+        self._apply_compact_filter()
+        self._apply_window_hints()
+
+        if compact:
+            self.setMinimumSize(0, 0)
+            self.adjustSize()
+            self.resize(self.sizeHint())
+        else:
+            self.setMinimumSize(self._expanded_minimum)
+            self.resize(self._expanded_size)
+
+    def _apply_window_hints(self) -> None:
+        """Compact is a always-on-top, every-workspace launcher bar.
+
+        Both hints are dropped when the window expands again: a full-size window
+        that refuses to go behind anything is a nuisance, not a feature.
+        """
+        platform_hints.set_always_on_top(self, self._compact)
+        note = platform_hints.set_visible_on_all_workspaces(self, self._compact)
+        if self._compact and note:
+            # Worth saying once, not worth blocking on.
+            self.compact_button.setToolTip(
+                "Back to the full window (Ctrl+M)\n\nNote: %s" % note
+            )
+
+    def _apply_compact_filter(self) -> None:
+        """Show only the selected chip and the selected tile while compact."""
+        selected_show = self.chip_bar.selected_name()
+        for chip in self.chip_bar._chips:
+            chip.setVisible(not self._compact or chip.name == selected_show)
+        self.chip_bar.line_edit.setVisible(not self._compact)
+
+        active = self._active_dcc.name if self._active_dcc else None
+        for name, button in self._dcc_buttons.items():
+            button.setVisible(not self._compact or name == active)
+        self.dcc_placeholder.setVisible(
+            not self._compact and not self._dcc_buttons
+        )
+
+        # Both rows are FlowLayouts, which skip hidden widgets only when asked
+        # to lay out again.
+        self.chip_bar._row.invalidate()
+        self.dcc_row.invalidate()
+        if self._compact:
+            self.adjustSize()
+
+    # -- favourites --------------------------------------------------------
+
+    def show_settings(self) -> None:
+        """Edit the three roots, then re-read everything they feed."""
+        dialog = SettingsDialog(self)
+        if dialog.exec() != SettingsDialog.Accepted:
+            return
+
+        overrides = dialog.overrides()
+        config.set_path_overrides(overrides)
+        error = self.store.set_path_overrides(overrides)
+        if error:
+            self.statusBar().showMessage(error, 8000)
+
+        # Everything downstream is derived from these paths, so re-read the lot
+        # rather than trying to work out what changed.
+        self.reload_projects()
+        self.refresh_package_lists()
+        self.statusBar().showMessage("Settings saved", 5000)
+
+    def show_favorites(self) -> None:
+        """Open (or raise) the favourites window."""
+        if self._favorites_window is None:
+            window = FavoritesWindow(self.store, self)
+            window.favoriteChosen.connect(self._on_apply_config)
+            window.storeChanged.connect(self._rebuild_file_menu)
+            window.add_button.clicked.connect(self._on_add_current_favorite)
+            self._favorites_window = window
+        self._favorites_window.refresh()
+        self._favorites_window.show()
+        self._favorites_window.raise_()
+        self._favorites_window.activateWindow()
+
+    def _on_add_current_favorite(self) -> None:
+        self._on_save_config()
+        if self._favorites_window is not None:
+            self._favorites_window.refresh()
+
+    def _on_launch_menu(self, point) -> None:
+        menu = QMenu(self)
+        launch_action = menu.addAction("Launch")
+        update_action = menu.addAction(dev_install.MENU_LABEL)
+        update_action.setEnabled(self.launch_button.isEnabled())
+        launch_action.setEnabled(self.launch_button.isEnabled())
+
+        chosen = menu.exec(self.launch_button.mapToGlobal(point))
+        if chosen is launch_action:
+            self._on_launch()
+        elif chosen is update_action:
+            self._on_update_and_launch()
+
+    def _on_update_and_launch(self) -> None:
+        project = self.current_project()
+        tool = self._current_tool()
+        if project is None or tool is None:
+            return
+
+        if not dev_install.IMPLEMENTED:
+            # Deliberately does not fall through to a plain launch: that would
+            # look like the update ran.
+            QMessageBox.information(
+                self,
+                dev_install.MENU_LABEL,
+                dev_install.NOT_IMPLEMENTED_NOTE,
+            )
+            return
+
+        error = dev_install.update_dev_installs(project, self.terminal_packages())
+        if error:
+            QMessageBox.warning(self, "Dev installs not updated", error)
+            return
+        self._on_launch()
+
+    def _on_launch(self) -> None:
+        project = self.current_project()
+        tool = self._current_tool()
+        if project is None or tool is None:
+            return
+        try:
+            launcher.launch(project, tool)
+        except OSError as exc:
+            QMessageBox.critical(
+                self,
+                "Launch failed",
+                "Could not start %s for %s:\n\n%s\n\nCommand:\n%s"
+                % (tool, project.name, exc, launcher.command_preview(project, tool)),
+            )
+            return
+        self.save_ui_state()
+        self.statusBar().showMessage(
+            "Launched %s for %s" % (tool, project.name), 8000
+        )
+
+    def save_ui_state(self) -> str:
+        """Remember where you were: show, software, and every variant choice.
+
+        Written on Launch rather than on every click -- launching is the moment
+        that says "this is the setup I meant", and it keeps the config file off
+        the write path of ordinary browsing.
+        """
+        project = self.current_project()
+        error = self.store.save_ui_state(
+            selected_show=project.name if project else None,
+            selected_dcc=self._preferred_dcc,
+            variants=self._dcc_variant,
+            compact=self._compact,
+        )
+        if error:
+            self.statusBar().showMessage(error, 8000)
+        return error
+
+    # -- helpers -----------------------------------------------------------
+
+    def _set_status(self, text: str, level: str = "") -> None:
+        self.status_label.setText(text)
+        # Hidden when empty, or the now-usually-empty label leaves a gap under
+        # the show field where the old green line used to be.
+        self.status_label.setVisible(bool(text))
+        self.status_label.setProperty("level", level)
+        self.status_label.style().unpolish(self.status_label)
+        self.status_label.style().polish(self.status_label)
+
+
+def apply_style(app: QApplication) -> None:
+    app.setStyleSheet(STYLESHEET)
