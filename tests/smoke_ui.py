@@ -811,8 +811,25 @@ check("logo hidden", not window.title_label.isVisible())
 check("tagline hidden", not window.tagline.isVisible())
 check("package sections hidden", not window.resolve_frame.isVisible() and not window.local_frame.isVisible() and not window.dev_frame.isVisible())
 check("copy button hidden", not window.copy_button.isVisible())
-check("terminal and favourites hidden", not window.terminal_button.isVisible() and not window.favorites_button.isVisible())
+check("terminal hidden", not window.terminal_button.isVisible())
 check("menu bar hidden", not window.menuBar().isVisible())
+check("window title cleared", window.windowTitle() == "", window.windowTitle())
+check(
+    "the tile does not respond to clicks",
+    window._dcc_buttons["nuke"].testAttribute(Qt.WA_TransparentForMouseEvents),
+)
+check(
+    "but is not greyed out either - it is a label, not an unavailable control",
+    window._dcc_buttons["nuke"].isEnabled(),
+)
+check(
+    "the chip does not respond either",
+    window.chip_bar.chip("batman_returns").testAttribute(Qt.WA_TransparentForMouseEvents),
+)
+check(
+    "and drops its unusable close button",
+    not window.chip_bar.chip("batman_returns").remove_button.isVisible(),
+)
 
 check(
     "only the selected chip is left",
@@ -914,6 +931,20 @@ check("logo back", window.title_label.isVisible())
 check("all chips back", all(c.isVisible() for c in window.chip_bar._chips))
 check("all tiles back", all(b.isVisible() for b in window._dcc_buttons.values()))
 check("menu bar back", window.menuBar().isVisible())
+check(
+    "the title says the version again",
+    window.windowTitle().startswith("BootyCall "),
+    window.windowTitle(),
+)
+check(
+    "the tile takes clicks again",
+    not window._dcc_buttons["nuke"].testAttribute(Qt.WA_TransparentForMouseEvents),
+)
+check(
+    "and the chip, close button and all",
+    not window.chip_bar.chip("batman_returns").testAttribute(Qt.WA_TransparentForMouseEvents)
+    and window.chip_bar.chip("batman_returns").remove_button.isVisible(),
+)
 check("the button is Launch again", window.launch_button.text() == "Launch")
 check(
     "and the chip shows its whole name",
@@ -998,6 +1029,15 @@ else:
     check("calling it raises rather than doing nothing quietly", False)
 check("the launch button offers a context menu", window.launch_button.contextMenuPolicy() == Qt.CustomContextMenu)
 
+print("\nthe window says which version it is")
+from bootycall import __version__ as _ver  # noqa: E402
+
+check(
+    "title carries the package version",
+    window.windowTitle() == "BootyCall %s" % _ver,
+    window.windowTitle(),
+)
+
 print("\nbranding")
 from bootycall.ui.main_window import TAGLINES  # noqa: E402
 
@@ -1025,7 +1065,9 @@ print("\nsettings")
 from bootycall.ui.settings_dialog import SettingsDialog  # noqa: E402
 from bootycall import config as cfg_mod  # noqa: E402
 
-check("a Settings menu exists", "Settings" in [m.title().replace("&", "") for m in window.menuBar().findChildren(type(window.file_menu))], str([m.title() for m in window.menuBar().findChildren(type(window.file_menu))]))
+_menus = [m.title().replace("&", "") for m in window.menuBar().findChildren(type(window.file_menu))]
+check("a Settings menu exists", "Settings" in _menus, str(_menus))
+check("and the software one is plural", "Softwares" in _menus, str(_menus))
 check("and a File entry too", window.settings_action in window.file_menu.actions())
 
 dialog = SettingsDialog(window)
@@ -1122,7 +1164,7 @@ QApplication.processEvents()
 check("no tiles", not window._dcc_buttons)
 check(
     "message says hidden, not unconfigured",
-    "all hidden" in window.status_label.text() and "Software menu" in window.status_label.text(),
+    "all hidden" in window.status_label.text() and "Softwares menu" in window.status_label.text(),
     window.status_label.text(),
 )
 check("launch disabled", not window.launch_button.isEnabled())
@@ -1223,15 +1265,12 @@ window._dcc_buttons["nuke"].click()
 QApplication.processEvents()
 check("terminal tile enabled once a tool is picked", window.terminal_button.isEnabled())
 check("terminal tile is not in the exclusive DCC group", window.terminal_button not in window.dcc_group.buttons())
-check("favourites button always enabled", window.favorites_button.isEnabled())
-check("favourites button is a compact ellipsis, not a tile", window.favorites_button.text() == "\u22ef")
-check("favourites button is small", window.favorites_button.size().width() == 30 and window.favorites_button.size().height() == 30)
-check("favourites button sits in the software row", window.dcc_row.indexOf(window.favorites_button) >= 0)
 check(
-    "and is the last item in that row",
-    window.dcc_row.indexOf(window.favorites_button) == window.dcc_row.count() - 1,
-    "%d of %d" % (window.dcc_row.indexOf(window.favorites_button), window.dcc_row.count()),
+    "no button in the software row - the menu covers it",
+    not hasattr(window, "favorites_button"),
 )
+check("still reachable from the File menu", window.favorites_action in window.file_menu.actions())
+check("and by shortcut", window.favorites_action.shortcut().toString() == "Ctrl+B", window.favorites_action.shortcut().toString())
 
 term_pkgs = window.resolved_packages()
 check("terminal uses the selected variant's requests", "nuke-16.0" in term_pkgs, str(term_pkgs[:3]))

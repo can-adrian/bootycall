@@ -37,6 +37,16 @@ class DccTile(QToolButton):
 
     # -- subtitle ----------------------------------------------------------
 
+    def set_interactive(self, enabled: bool) -> None:
+        """Turn clicking on or off without greying the tile out.
+
+        Compact mode shows the selected tile as a label. Disabling it would
+        grey the icon and read as "this software is unavailable", which is the
+        opposite of what it means.
+        """
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, not enabled)
+        self.setFocusPolicy(Qt.StrongFocus if enabled else Qt.NoFocus)
+
     def subtitle(self) -> str:
         return self._subtitle
 

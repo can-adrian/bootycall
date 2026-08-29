@@ -81,6 +81,20 @@ class ShowChip(QWidget):
     def name(self) -> str:
         return self._name
 
+    def set_interactive(self, enabled: bool) -> None:
+        """Turn clicking on or off without changing how the chip looks.
+
+        Compact mode shows the selected chip as a label, not a control, so it
+        is made transparent to the mouse rather than disabled -- a greyed-out
+        chip would read as "this show is unavailable". The ✕ goes away
+        entirely, since a control you cannot use should not take up room.
+        """
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, not enabled)
+        self.setFocusPolicy(Qt.TabFocus if enabled else Qt.NoFocus)
+        self.setCursor(Qt.PointingHandCursor if enabled else Qt.ArrowCursor)
+        self.remove_button.setVisible(enabled)
+        self._apply_label()
+
     def set_elide_width(self, width: int | None) -> None:
         """Cap the chip's width, shortening the name to fit.
 
@@ -99,12 +113,9 @@ class ShowChip(QWidget):
             return
 
         margins = self.layout().contentsMargins()
-        chrome = (
-            margins.left()
-            + margins.right()
-            + self.layout().spacing()
-            + self.remove_button.width()
-        )
+        chrome = margins.left() + margins.right()
+        if not self.remove_button.isHidden():
+            chrome += self.layout().spacing() + self.remove_button.width()
         available = max(24, self._elide_width - chrome)
         self.label.setText(
             self.label.fontMetrics().elidedText(
@@ -193,12 +204,19 @@ class ShowChipBar(QFrame):
         self._chips: list[ShowChip] = []
         self._selected: str | None = None
         self._chip_max_width: int | None = None
+        self._interactive = True
 
     def set_chip_max_width(self, width: int | None) -> None:
         """Cap every chip's width, now and for chips added later."""
         self._chip_max_width = width
         for chip in self._chips:
             chip.set_elide_width(width)
+
+    def set_interactive(self, enabled: bool) -> None:
+        """Turn chip clicking on or off, now and for chips added later."""
+        self._interactive = enabled
+        for chip in self._chips:
+            chip.set_interactive(enabled)
 
     # -- focus ring --------------------------------------------------------
 
@@ -254,6 +272,7 @@ class ShowChipBar(QFrame):
 
         chip = ShowChip(name)
         chip.set_elide_width(self._chip_max_width)
+        chip.set_interactive(self._interactive)
         chip.clicked.connect(self.select)
         chip.removeRequested.connect(self.remove)
         self._chips.append(chip)

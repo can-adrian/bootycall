@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import config, dev_install, launcher, platform_hints
+from .. import __version__, config, dev_install, launcher, platform_hints
 from ..configs import ConfigStore, SavedConfig
 from ..discovery import (
     Project,
@@ -159,7 +159,8 @@ def _badge(letter: str, color: str, size: int = 26) -> QPixmap:
 class MainWindow(QMainWindow):
     def __init__(self, store: ConfigStore | None = None) -> None:
         super().__init__()
-        self.setWindowTitle("BootyCall")
+        self.EXPANDED_TITLE = "BootyCall %s" % __version__
+        self.setWindowTitle(self.EXPANDED_TITLE)
         self.resize(705, 680)
         self.setMinimumSize(570, 560)
 
@@ -265,14 +266,6 @@ class MainWindow(QMainWindow):
         self.terminal_button.setEnabled(False)
         self.terminal_button.clicked.connect(self._on_open_terminal)
         self.dcc_row.addWidget(self.terminal_button)
-
-        self.favorites_button = QToolButton()
-        self.favorites_button.setObjectName("moreButton")
-        self.favorites_button.setText("\u22ef")  # midline horizontal ellipsis
-        self.favorites_button.setFixedSize(30, 30)
-        self.favorites_button.setToolTip("Favourites (Ctrl+B)")
-        self.favorites_button.clicked.connect(self.show_favorites)
-        self.dcc_row.addWidget(self.favorites_button)
 
         root.addWidget(dcc_container)
 
@@ -434,7 +427,7 @@ class MainWindow(QMainWindow):
         settings_menu = self.menuBar().addMenu("Se&ttings")
         settings_menu.addAction(self.settings_action)
 
-        self.software_menu = self.menuBar().addMenu("&Software")
+        self.software_menu = self.menuBar().addMenu("&Softwares")
         self._software_actions: dict[str, QAction] = {}
 
         for dcc in config.DCCS:
@@ -759,7 +752,7 @@ class MainWindow(QMainWindow):
             # lie, and would send someone to edit the bootstrap for no reason.
             self._set_status(
                 "%s  -  this show offers %s, all hidden. Turn them on in the "
-                "Software menu." % (message, ", ".join(hidden)),
+                "Softwares menu." % (message, ", ".join(hidden)),
                 "error",
             )
             return
@@ -791,6 +784,7 @@ class MainWindow(QMainWindow):
                 chosen = newest_variant(self._bootstrap, dcc, keys)
             self._dcc_variant[dcc.name] = chosen
 
+            button.set_interactive(not self._compact)
             self._dcc_buttons[dcc.name] = button
             self._refresh_tile(dcc)
             self.dcc_group.addButton(button)
@@ -1445,11 +1439,12 @@ class MainWindow(QMainWindow):
             self.dev_frame,
             self.copy_button,
             self.terminal_button,
-            self.favorites_button,
         ):
             widget.setVisible(not compact)
         self.menuBar().setVisible(not compact)
         self.statusBar().setVisible(not compact)
+        # No title bar text: compact is a button, not a window you manage.
+        self.setWindowTitle("" if compact else self.EXPANDED_TITLE)
         if self.status_label.text():
             self.status_label.setVisible(not compact)
 
@@ -1523,15 +1518,22 @@ class MainWindow(QMainWindow):
             )
 
     def _apply_compact_filter(self) -> None:
-        """Show only the selected chip and the selected tile while compact."""
+        """Show only the selected chip and tile while compact, as labels.
+
+        Neither responds to clicks there: compact has room for one of each, so
+        a control that can only ever select what is already selected is just a
+        way to lose your place.
+        """
         selected_show = self.chip_bar.selected_name()
         for chip in self.chip_bar._chips:
             chip.setVisible(not self._compact or chip.name == selected_show)
+        self.chip_bar.set_interactive(not self._compact)
         self.chip_bar.line_edit.setVisible(not self._compact)
 
         active = self._active_dcc.name if self._active_dcc else None
         for name, button in self._dcc_buttons.items():
             button.setVisible(not self._compact or name == active)
+            button.set_interactive(not self._compact)
         self.dcc_placeholder.setVisible(
             not self._compact and not self._dcc_buttons
         )

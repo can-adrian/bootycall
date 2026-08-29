@@ -51,9 +51,9 @@ The tagline under the logo is drawn at random each launch from
    selected at a time, and that selection is what the rest of the window
    describes. Finds the selected show's bootstrap and reads its `packages`.
 3. Filters a **hard-coded** DCC list down to what the show actually defines.
-   The row shows Houdini Core, Houdini FX, Maya, Nuke and Terminal by default;
-   it wraps, and ends in a small **⋯** button. Each tile carries its chosen
-   variant's version in grey underneath.
+   The row shows Houdini Core, Houdini FX, Maya, Nuke and Terminal by default
+   and wraps as needed. Each tile carries its chosen variant's version in grey
+   underneath.
 4. Shows the resolved package request for the selected variant, your local
    packages and your dev packages, in three collapsible sections (all closed by
    default).
@@ -321,8 +321,8 @@ available whatever is selected. Ctrl+T does the same.
 
 ## Favourites
 
-The small **⋯** button at the end of the software row (or Ctrl+B) opens a
-separate, non-modal window over the same saved-setup store the File menu uses. The menu is fine for *picking* a
+**File → Favourites…** (or Ctrl+B) opens a separate, non-modal window over the
+same saved-setup store the File menu uses. The menu is fine for *picking* a
 setup but a bad place to *manage* one — menus close on every click, and a menu
 row has no room for reorder or rename — so this window carries Add current,
 Rename, Move up/down and Remove, with double-click to load.
@@ -361,8 +361,14 @@ hidden in compact mode it was still setting the floor for the entire window.
 
 Everything is hidden rather than removed, so expanding brings back exactly what
 was there — open package sections included, and the window's previous size.
-While compact, the view follows the selection: switch chip or tile and the one
-on show changes with it.
+
+The chip and tile that remain are **labels, not controls**: neither responds to
+clicks, and the chip drops its ✕. Compact has room for one of each, so a control
+that can only ever select what is already selected is just a way to lose your
+place. They're made transparent to the mouse rather than disabled — greying them
+out would read as "this show/software is unavailable", the opposite of what it
+means. The window title is cleared too; compact is a button, not a window you
+manage.
 
 The menu bar and status bar are hidden too. Everything they hold is reachable
 again one click away, and leaving them visible would have made "compact" a
@@ -495,7 +501,7 @@ best-first, plus a display label per key:
 
 Out of the box the row is **Houdini Core, Houdini FX, Maya, Nuke, Terminal**.
 Nuke Studio, Hiero and Blender stay in the registry but start switched off — a
-row of nine tiles buries the four people actually reach for. The **Software**
+row of nine tiles buries the four people actually reach for. The **Softwares**
 menu has a checkbox per entry plus *Reset to defaults*; the choice is saved
 alongside the favourites and survives restarts.
 
@@ -503,7 +509,7 @@ Turning one on puts its tile back in **registry order**, not click order, so the
 row doesn't reshuffle depending on what you enabled first.
 
 A show that defines only hidden software says so — *"this show offers Hiero,
-Blender, all hidden. Turn them on in the Software menu."* Reporting that as "not
+Blender, all hidden. Turn them on in the Softwares menu."* Reporting that as "not
 configured" would be a lie, and would send someone to edit a bootstrap for no
 reason. When some are hidden and some aren't, the status line notes it quietly:
 `.ilp/pipeline/config.py - 40 tools   (Hiero, Blender hidden)`.
