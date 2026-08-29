@@ -72,13 +72,8 @@ print("\nDCC filter (hard-coded, filtered by what exists)")
 entries = available_dccs(bs)
 names = [d.name for d, _ in entries]
 check(
-    "six of seven DCCs present",
+    "every registered DCC this bootstrap defines gets a tile",
     names == ["houdinicore", "houdinifx", "maya", "nuke", "hiero", "blender"],
-    str(names),
-)
-check(
-    "nukestudio absent - this bootstrap defines no such key",
-    "nukestudio" not in names,
     str(names),
 )
 by_name = {d.name: keys for d, keys in entries}
@@ -192,7 +187,7 @@ check("cleared", config.shows_root() == config.path_defaults()["shows_root"])
 check("dev is a reserved package name", config.RESERVED_PACKAGE_NAMES == ("dev",))
 
 print("\nregistry sanity")
-check("seven DCCs configured", len(config.DCCS) == 7)
+check("six DCCs configured", len(config.DCCS) == 6, str([d.name for d in config.DCCS]))
 check(
     "two DCCs shown by default, which with Terminal is the starting row",
     config.DEFAULT_VISIBLE_SOFTWARE == ("houdinicore", "maya"),
@@ -211,7 +206,16 @@ check(
 )
 check(
     "the long tail is off by default",
-    not any(d.default_visible for d in config.DCCS if d.name in ("nukestudio", "hiero", "blender")),
+    not any(
+        d.default_visible
+        for d in config.DCCS
+        if d.name in ("houdinifx", "nuke", "hiero", "blender")
+    ),
+)
+check(
+    "nuke studio is gone from the registry entirely",
+    "nukestudio" not in [d.name for d in config.DCCS],
+    str([d.name for d in config.DCCS]),
 )
 check("every key has a label", all(k in d.variant_labels for d in config.DCCS for k in d.keys))
 
@@ -279,16 +283,58 @@ check(
 print("\nthe script itself")
 check(
     "rez_argv puts the executable after --",
-    launcher.rez_argv(("a-1", "b-2"), "maya") == ["rez-env", "a-1", "b-2", "--", "maya"],
-    str(launcher.rez_argv(("a-1", "b-2"), "maya")),
+    launcher.rez_argv(("a-1", "b-2"), "maya", show_info=False)
+    == ["rez-env", "a-1", "b-2", "--", "maya"],
+    str(launcher.rez_argv(("a-1", "b-2"), "maya", show_info=False)),
 )
 check(
     "and omits it entirely for a shell",
     launcher.rez_argv(("a-1",)) == ["rez-env", "a-1"],
     str(launcher.rez_argv(("a-1",))),
 )
+
+print("\nlaunching reports the resolve, the way a terminal always did")
+_with_info = launcher.rez_argv(("a-1",), "maya")
+check(
+    "the app runs behind rez-context",
+    _with_info[:4] == ["rez-env", "a-1", "--", "bash"],
+    str(_with_info),
+)
+check(
+    "which prints the same table an interactive rez shell prints",
+    "rez-context" in _with_info[-1],
+    _with_info[-1],
+)
+check(
+    "and execs the app, so nothing extra is left in the process tree",
+    "exec maya" in _with_info[-1],
+    _with_info[-1],
+)
+check(
+    "a missing rez-context does not stop the launch",
+    "2>/dev/null" in _with_info[-1],
+    _with_info[-1],
+)
+check(
+    "a shell needs none of it - rez prints the table itself on the way in",
+    launcher.rez_argv(("a-1",)) == ["rez-env", "a-1"],
+    str(launcher.rez_argv(("a-1",))),
+)
+_saved_info = config.SHOW_RESOLVE_INFO
+config.SHOW_RESOLVE_INFO = False
+check(
+    "and it can be switched off",
+    launcher.rez_argv(("a-1",), "maya") == ["rez-env", "a-1", "--", "maya"],
+    str(launcher.rez_argv(("a-1",), "maya")),
+)
+config.SHOW_RESOLVE_INFO = _saved_info
+
 _script = launcher.build_script(("a-1",), "maya")
-check("the command is echoed first", _script.startswith('echo "+ rez-env a-1 -- maya"'), _script[:60])
+check(
+    "the command is echoed first",
+    _script.startswith('echo "+ rez-env a-1 -- bash -c'),
+    _script[:60],
+)
 check("the status is captured and reported", "rc=$?" in _script and "$rc" in _script)
 check("and the window waits before closing", "read -r -p" in _script)
 check(

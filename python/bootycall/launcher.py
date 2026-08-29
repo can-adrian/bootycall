@@ -123,10 +123,39 @@ def filtered_packages_path(
     return paths, ""
 
 
-def rez_argv(packages: Sequence[str], command: str = "") -> list[str]:
-    """The rez invocation itself, without a terminal around it."""
+def context_preamble(command: str) -> str:
+    """Print the resolved context, then become the application.
+
+    ``exec`` on purpose: the shell replaces itself with the DCC rather than
+    sitting around as its parent, so the process tree is the same as it would
+    have been without the wrapper.
+
+    ``rez-context`` prints the same table rez shows when you enter an
+    interactive resolved shell -- requested packages, resolved packages, the
+    lot -- and colours it when stdout is a terminal, which here it is.
+    """
+    return "rez-context 2>/dev/null; echo; exec %s" % shlex.quote(command)
+
+
+def rez_argv(
+    packages: Sequence[str], command: str = "", show_info: bool | None = None
+) -> list[str]:
+    """The rez invocation itself, without a terminal around it.
+
+    With no command this is a bare ``rez-env``, which drops you in an
+    interactive resolved shell -- and rez prints the context on the way in, for
+    free. With a command there is no shell to do that, so unless asked not to,
+    the command is run behind :func:`context_preamble` to get the same report.
+    """
     argv = ["rez-env", *packages]
-    if command:
+    if not command:
+        return argv
+
+    if show_info is None:
+        show_info = config.show_resolve_info()
+    if show_info:
+        argv += ["--", "bash", "-c", context_preamble(command)]
+    else:
         argv += ["--", command]
     return argv
 

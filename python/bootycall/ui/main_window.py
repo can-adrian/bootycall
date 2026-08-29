@@ -171,7 +171,9 @@ class MainWindow(QMainWindow):
         self.EXPANDED_TITLE = "BootyCall %s" % __version__
         self.setWindowTitle(self.EXPANDED_TITLE)
         self.resize(705, 680)
-        self.setMinimumSize(570, 560)
+        # 428 rather than 570: the window has to be parkable beside a DCC,
+        # and everything in it either wraps or elides at this width.
+        self.setMinimumSize(428, 560)
 
         self._bootstrap: Bootstrap | None = None
         self._dcc_buttons: dict[str, DccTile] = {}
@@ -265,7 +267,15 @@ class MainWindow(QMainWindow):
 
         # DCC row ---------------------------------------------------------
         dcc_container = QWidget()
+        self.dcc_container = dcc_container
         self.dcc_row = FlowLayout(dcc_container, margin=0, spacing=10)
+        # A FlowLayout answers heightForWidth, but a QVBoxLayout only asks when
+        # the child widget's size policy says it should. Without this the
+        # container keeps one row's height and the tiles that wrapped onto a
+        # second row are simply cut off -- which is what a narrow window does.
+        _policy = dcc_container.sizePolicy()
+        _policy.setHeightForWidth(True)
+        dcc_container.setSizePolicy(_policy)
         self.dcc_group = QButtonGroup(self)
         self.dcc_group.setExclusive(True)
         self.dcc_group.buttonClicked.connect(self._on_dcc_clicked)
@@ -338,10 +348,9 @@ class MainWindow(QMainWindow):
         footer = QHBoxLayout()
         footer.setSpacing(10)
         self._footer = footer
-        self.copy_button = QPushButton("Copy command")
-        self.copy_button.clicked.connect(self._on_copy_command)
-        self.copy_button.setEnabled(False)
-        footer.addWidget(self.copy_button)
+        # Copy command lives on the Edit menu now. It is a thing you reach for
+        # when something has gone wrong and you want to paste the resolve into
+        # a shell -- worth having, not worth a permanent button in the footer.
         footer.addStretch(1)
         self._footer_lead_spacer = footer.itemAt(footer.count() - 1)
 
@@ -443,6 +452,12 @@ class MainWindow(QMainWindow):
         self.settings_action.triggered.connect(self.show_settings)
         self.addAction(self.settings_action)
 
+        self.copy_action = QAction("&Copy launch command", self)
+        self.copy_action.setShortcut(QKeySequence.Copy)
+        self.copy_action.setEnabled(False)
+        self.copy_action.triggered.connect(self._on_copy_command)
+        self.addAction(self.copy_action)
+
         self.quit_action = QAction("&Quit", self)
         self.quit_action.setShortcut(QKeySequence.Quit)
         self.quit_action.triggered.connect(self.close)
@@ -461,6 +476,9 @@ class MainWindow(QMainWindow):
         """
         # A top-level Settings entry as well as the File one: paths are the
         # thing people go looking for, and burying them under File hides them.
+        self.edit_menu = self.menuBar().addMenu("&Edit")
+        self.edit_menu.addAction(self.copy_action)
+
         settings_menu = self.menuBar().addMenu("Se&ttings")
         settings_menu.addAction(self.settings_action)
 
@@ -961,6 +979,33 @@ class MainWindow(QMainWindow):
         self.dcc_placeholder.show()
         self._equalise_tiles()
 
+    def _fit_dcc_row(self) -> None:
+        """Hold the tile row open to however many lines it actually wraps to.
+
+        The size policy makes the parent layout *ask* for the wrapped height,
+        but a QVBoxLayout will still squeeze a widget down to its minimum when
+        something else in the column wants the room -- and this layout's
+        minimum is one tile. The result is a second row of tiles laid out below
+        the bottom edge of the container: present, positioned, and invisible.
+
+        Pinning the minimum to the wrapped height is what stops that. It is
+        recomputed on every resize because the number of lines is a function of
+        the width.
+        """
+        container = getattr(self, "dcc_container", None)
+        if container is None:
+            return
+        width = container.width()
+        if width <= 0:
+            return
+        needed = self.dcc_row.heightForWidth(width)
+        if needed > 0 and needed != container.minimumHeight():
+            container.setMinimumHeight(needed)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._fit_dcc_row()
+
     def _equalise_tiles(self) -> None:
         """Give every tile in the row the same size, set by the widest of them.
 
@@ -987,6 +1032,7 @@ class MainWindow(QMainWindow):
         self._tile_width = width
 
         self.dcc_row.invalidate()
+        self._fit_dcc_row()
 
     def _on_dcc_clicked(self, button: DccTile) -> None:
         dcc = config.dcc_by_name(button.dcc_name)
@@ -1558,6 +1604,8 @@ class MainWindow(QMainWindow):
                     item.setText(base)
                     item.setForeground(QColor("#d7dae0"))
 
+            self._float_overrides(listing, overrides)
+
             if not frame.is_checked():
                 frame.set_note("not used", "")
             elif packages:
@@ -1565,6 +1613,47 @@ class MainWindow(QMainWindow):
                     "%d in use" % len(overrides) if overrides else "",
                     "warn" if overrides else "",
                 )
+
+    def _float_overrides(self, listing: QListWidget, overrides: dict) -> None:
+        """Lift the packages that override the resolve to the top of the list.
+
+        These are the rows that change what you are about to launch. A root
+        with thirty builds in it buries the two that matter halfway down, and
+        scrolling to find out whether one of yours is in play defeats the point
+        of showing the list at all.
+
+        Every version of an overriding name moves, not just the winning one, so
+        a name's builds stay together and the "(older build)" rows keep sitting
+        under the one that beat them. Order within each group is untouched.
+        """
+        if not overrides or listing.count() < 2:
+            return
+
+        rows = [listing.item(row) for row in range(listing.count())]
+        names = [item.data(_PACKAGE_NAME_ROLE) for item in rows]
+        if not any(name in overrides for name in names if name):
+            return
+
+        # Stable partition: taking items out of a QListWidget renumbers the
+        # rest, so the order is decided first and applied afterwards.
+        wanted = [
+            item
+            for item, name in zip(rows, names)
+            if name and name in overrides
+        ]
+        rest = [item for item in rows if item not in wanted]
+        if [id(i) for i in wanted + rest] == [id(i) for i in rows]:
+            return  # already in that order; reordering would only flicker
+
+        blocked = listing.blockSignals(True)
+        selected = {id(item) for item in listing.selectedItems()}
+        for _ in range(listing.count()):
+            listing.takeItem(0)
+        for item in wanted + rest:
+            listing.addItem(item)
+            if id(item) in selected:
+                item.setSelected(True)
+        listing.blockSignals(blocked)
 
     def _on_frame_toggled(self, _expanded: bool) -> None:
         self._apply_frame_stretch()
@@ -1696,7 +1785,7 @@ class MainWindow(QMainWindow):
             and self._current_tool() is not None
         )
         self.launch_button.setEnabled(ready)
-        self.copy_button.setEnabled(ready)
+        self.copy_action.setEnabled(ready)
         self.save_action.setEnabled(ready)
         self.terminal_button.setEnabled(ready)
 
@@ -1848,7 +1937,6 @@ class MainWindow(QMainWindow):
             self.resolve_frame,
             self.local_frame,
             self.dev_frame,
-            self.copy_button,
             self.terminal_button,
         ):
             widget.setVisible(not compact)

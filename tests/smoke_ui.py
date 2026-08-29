@@ -228,7 +228,7 @@ check(
     window.status_label.text() == "",
     window.status_label.text(),
 )
-check("nuke studio absent - no such key in this bootstrap", "nukestudio" not in window._dcc_buttons)
+check("nuke studio is not offered at all any more", "nukestudio" not in window._dcc_buttons)
 check("houdinicore auto-selected", window._active_dcc.name == "houdinicore")
 check("no variant row anywhere", not hasattr(window, "variant_combo"))
 check("three houdini variants known", window._dcc_variants["houdinicore"] == ("houdinicore", "prman", "dev_houdini"), str(window._dcc_variants["houdinicore"]))
@@ -339,9 +339,15 @@ preview = launcher.command_preview(
 check("preview mentions show path", "/tmp/ice/shows/batman_returns" in preview, preview)
 check(
     "preview runs the DCC executable",
-    launcher.rez_argv(window.resolved_packages(), window._active_dcc.run_command)[-2:]
-    == ["--", "maya"],
-    str(launcher.rez_argv(window.resolved_packages(), "maya")[-2:]),
+    "exec maya" in launcher.rez_argv(
+        window.resolved_packages(), window._active_dcc.run_command
+    )[-1],
+    str(launcher.rez_argv(window.resolved_packages(), "maya")[-1]),
+)
+check(
+    "and prints the resolve on the way in, as a terminal always did",
+    "rez-context" in launcher.rez_argv(window.resolved_packages(), "maya")[-1],
+    str(launcher.rez_argv(window.resolved_packages(), "maya")[-1]),
 )
 check("and resolves through rez", "rez-env" in preview, preview[:80])
 print("       %s" % preview[:120])
@@ -400,8 +406,23 @@ pin("batman_returns")
 pin("dune_pt3")
 pin("combat_2")
 check("three chips", window.chip_bar.names() == ["batman_returns", "dune_pt3", "combat_2"], str(window.chip_bar.names()))
-check("prompt shortens once chips share the field", window.project_field.placeholderText() == "Add a show...", window.project_field.placeholderText())
+check(
+    "the prompt goes away once chips are in the field",
+    window.project_field.placeholderText() == "",
+    window.project_field.placeholderText(),
+)
 check("the newest pin is selected", window.chip_bar.selected_name() == "combat_2")
+_names_now = list(window.chip_bar.names())
+unpin_all()
+check(
+    "and comes back when the field is empty again",
+    "Type a show name" in window.project_field.placeholderText(),
+    window.project_field.placeholderText(),
+)
+for _n in _names_now:
+    pin(_n)
+window.chip_bar.select("combat_2")
+QApplication.processEvents()
 check("exactly one chip is marked selected", [c.name for c in window.chip_bar._chips if c.is_selected()] == ["combat_2"])
 check("the window follows the selection", window.current_project().name == "combat_2")
 shot(window, "16-chips")
@@ -949,7 +970,7 @@ check("the window shrank", window.height() < expanded_height, "%d -> %d" % (expa
 check("logo hidden", not window.title_label.isVisible())
 check("tagline hidden", not window.tagline.isVisible())
 check("package sections hidden", not window.resolve_frame.isVisible() and not window.local_frame.isVisible() and not window.dev_frame.isVisible())
-check("copy button hidden", not window.copy_button.isVisible())
+check("the menu bar is hidden, and Copy command with it", not window.menuBar().isVisible())
 check("terminal hidden", not window.terminal_button.isVisible())
 check("menu bar hidden", not window.menuBar().isVisible())
 check("window title cleared", window.windowTitle() == "", window.windowTitle())
@@ -1267,7 +1288,7 @@ unpin_all()
 pin("batman_returns")
 
 print("\nsoftware visibility menu")
-check("menu lists every registry entry", len(window._software_actions) == 7, str(list(window._software_actions)))
+check("menu lists every registry entry", len(window._software_actions) == 6, str(list(window._software_actions)))
 check(
     "checked state matches the defaults",
     [n for n, a in window._software_actions.items() if a.isChecked()]
@@ -1321,7 +1342,7 @@ check(
     "houdini fx runs houdini - SideFX names them the other way round",
     _cfg.dcc_by_name("houdinifx").run_command == "houdini",
 )
-for _name in ("maya", "nuke", "hiero", "blender", "nukestudio"):
+for _name in ("maya", "nuke", "hiero", "blender"):
     check(
         "%s falls back to its own name" % _name,
         _cfg.dcc_by_name(_name).run_command == _name,
@@ -1343,8 +1364,9 @@ check(
 check("runs it through a shell", launch_argv[-3:-1] == ["bash", "-c"], str(launch_argv[-3:-1]))
 check("resolves with rez", "rez-env " in script, script[:80])
 check(
-    "the executable comes last in the command",
-    launcher.rez_argv(window.resolved_packages(), "nuke")[-2:] == ["--", "nuke"],
+    "the executable is what the wrapper execs",
+    launcher.rez_argv(window.resolved_packages(), "nuke")[-1].endswith("exec nuke"),
+    launcher.rez_argv(window.resolved_packages(), "nuke")[-1],
 )
 check(
     "requests are in the command",
@@ -1370,11 +1392,14 @@ check(
 
 _hold = _cfg.HOLD_TERMINAL
 _cfg.HOLD_TERMINAL = "never"
+_saved_info = _cfg.SHOW_RESOLVE_INFO
+_cfg.SHOW_RESOLVE_INFO = False
 check(
     "hold=never gives the bare command, no wrapper",
     launcher.build_script(("a-1",), "maya") == "rez-env a-1 -- maya",
     launcher.build_script(("a-1",), "maya"),
 )
+_cfg.SHOW_RESOLVE_INFO = _saved_info
 _cfg.HOLD_TERMINAL = "always"
 check("hold=always holds unconditionally", "if true; then" in launcher.build_script(("a-1",), "maya"))
 _cfg.HOLD_TERMINAL = _hold
@@ -1394,7 +1419,10 @@ check(
     "switching DCC changes the executable, not just the packages",
     launcher.rez_argv(
         window.resolved_packages(), window._active_dcc.run_command
-    )[-1] == "houdini",
+    )[-1].endswith("exec houdini"),
+    launcher.rez_argv(
+        window.resolved_packages(), window._active_dcc.run_command
+    )[-1],
 )
 window._dcc_buttons["nuke"].click()
 QApplication.processEvents()
@@ -1952,6 +1980,54 @@ cfg_mod.DEV_INSTALL_COMMAND = _saved_install
 cfg_mod.set_path_overrides({})
 window.refresh_package_lists()
 QApplication.processEvents()
+
+print("\noverriding packages come to the top of the list")
+pin("batman_returns")
+window.local_frame.set_expanded(True)
+QApplication.processEvents()
+_texts = [window.local_list.item(i).text() for i in range(window.local_list.count())]
+_overriding = [t for t in _texts if "overrides" in t]
+check("something is overriding", bool(_overriding), str(_texts))
+check(
+    "and it is first, not buried in the list",
+    "overrides" in _texts[0],
+    str(_texts),
+)
+check(
+    "the rest keep their order behind it",
+    _texts[1:] == sorted(_texts[1:]),
+    str(_texts[1:]),
+)
+
+print("\nthe menu bar carries Copy command now")
+check("there is an Edit menu", window.edit_menu.title() == "&Edit", window.edit_menu.title())
+check(
+    "with the copy action in it",
+    window.copy_action in window.edit_menu.actions(),
+    str([a.text() for a in window.edit_menu.actions()]),
+)
+check("enabled once there is something to copy", window.copy_action.isEnabled())
+window._on_copy_command()
+QApplication.processEvents()
+_copied = QApplication.clipboard().text()
+check("copying gives the whole command", "rez-env" in _copied, _copied[:80])
+check("cd'd into the show", "/tmp/ice/shows/batman_returns" in _copied, _copied[:80])
+check("and no footer button is left", not hasattr(window, "copy_button"))
+
+print("\nthe window is a quarter narrower than it was")
+check("minimum width", window.minimumWidth() == 428, str(window.minimumWidth()))
+window.resize(428, 700)
+for _ in range(4):
+    QApplication.processEvents()
+_tiles = list(window._dcc_buttons.values()) + [window.terminal_button]
+_rows = sorted({t.y() for t in _tiles})
+check("the tile row wraps at that width", len(_rows) > 1, str(_rows))
+_bottom = max(t.y() + t.height() for t in _tiles)
+check(
+    "and every tile is inside the row that holds them",
+    _bottom <= window.dcc_container.height(),
+    "%d in %d" % (_bottom, window.dcc_container.height()),
+)
 
 print("\nfavourites window")
 from bootycall.configs import SavedConfig as _SC  # noqa: E402

@@ -112,8 +112,10 @@ like the app lost it.
 
 Chips are keyboard-reachable: Tab to one, Space/Enter selects, Delete unpins.
 
-The window is sized for a 705px-wide default — narrow enough to park beside a
-DCC rather than owning the screen.
+The window is sized for a 705px-wide default and will go down to 428 — narrow
+enough to park beside a DCC rather than owning the screen. At that width the
+tile row wraps, section headers shorten their counts rather than their titles,
+and the show field's prompt is gone anyway once a show is pinned.
 
 ## The three package sections
 
@@ -418,11 +420,10 @@ Per DCC, defaulting to the DCC's own name in lowercase:
 
 | DCC | runs |
 |---|---|
-| Houdini Core | `houdinicore` |
-| Houdini FX | `houdini` |
+| Houdini | `houdinicore` |
+| HouFX | `houdini` |
 | Maya | `maya` |
 | Nuke | `nuke` |
-| Nuke Studio | `nukestudio` |
 | Hiero | `hiero` |
 | Blender | `blender` |
 
@@ -763,6 +764,7 @@ the ones below, and are handy for pointing a session at a test tree:
 | `BOOTYCALL_BOOTSTRAP_GLOBS` | `.ilp/pipeline/*.py:.ilp/bootstrap/*.py:.ilp/*/*.py:.ilp/*.py` |
 | `BOOTYCALL_TERMINAL_EMULATOR` | first of gnome-terminal, konsole, xfce4-terminal, alacritty, kitty, xterm found on PATH |
 | `BOOTYCALL_HOLD_TERMINAL` | `error` (also `always`, `never`) |
+| `BOOTYCALL_SHOW_RESOLVE_INFO` | `1` |
 | `BOOTYCALL_LAUNCH_COMMAND` | `<detected terminal> bash -c {script}` |
 | `BOOTYCALL_TERMINAL_COMMAND` | `<detected terminal> bash -c {script}` |
 | `BOOTYCALL_CONFIG_FILE` | `$XDG_CONFIG_HOME/bootycall/configs.json` |

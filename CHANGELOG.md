@@ -10,6 +10,30 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.4.0
+
+Minor rather than patch because the launch argv changed: a DCC now starts behind
+`rez-context` rather than directly.
+
+- **Launch prints the resolve, the way Terminal always has.** `rez-env pkgs` with
+  no command leaves you in an interactive rez shell and rez prints its requested/
+  resolved table on the way in; `rez-env pkgs -- app` has a command to run, so no
+  shell announces anything. The app now runs behind `rez-context`, which prints
+  the same table, in colour, and then `exec`s the application so nothing extra is
+  left in the process tree. `BOOTYCALL_SHOW_RESOLVE_INFO=0` turns it off.
+- **Overriding packages sort to the top** of the local and dev lists. They are
+  the rows that change what you are about to launch; a root with thirty builds
+  buries the two that matter.
+- **Copy command moved to a new Edit menu** (Ctrl+C) and is gone from the footer.
+- **Minimum width is 428px**, a quarter narrower. Two things had to be fixed to
+  make that width honest: the tile row was laid out across two lines but only
+  given one line's height, so the second row of tiles was drawn outside the
+  container; and section headers cut the *title* off mid-word rather than the
+  count beside it. The count now elides, with the full text on hover.
+- **The "Add a show..." prompt is gone once a show is pinned.** The chips say
+  what the field is for.
+- **Nuke Studio removed** from the registry entirely.
+
 ## 0.3.0
 
 Dev packages get a working location, and BootyCall stops assuming what is

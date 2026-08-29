@@ -190,6 +190,11 @@ class ShowChipBar(QFrame):
         self.setFrameShape(QFrame.NoFrame)
 
         self._row = FlowLayout(self, margin=6, spacing=6)
+        # Same reason as the DCC row: chips wrap, and a parent layout only asks
+        # for the wrapped height when the size policy tells it to.
+        _policy = self.sizePolicy()
+        _policy.setHeightForWidth(True)
+        self.setSizePolicy(_policy)
 
         self.line_edit = ProjectLineEdit()
         self.line_edit.setObjectName("showFieldEdit")
@@ -355,5 +360,5 @@ class ShowChipBar(QFrame):
             chip.set_selected(chip.name == self._selected)
 
     def _update_placeholder(self) -> None:
-        """Long prompt in an empty field, short one once chips crowd it."""
+        """A prompt in an empty field, and none at all once it has chips."""
         self.line_edit.set_compact_placeholder(bool(self._chips))

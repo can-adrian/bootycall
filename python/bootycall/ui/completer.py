@@ -66,7 +66,7 @@ class ProjectLineEdit(QLineEdit):
         return list(self._projects.values())
 
     def set_compact_placeholder(self, compact: bool) -> None:
-        """Shorten the prompt once chips are sharing the field with it."""
+        """Drop the prompt once chips are sharing the field with it."""
         if compact == self._compact:
             return
         self._compact = compact
@@ -76,7 +76,10 @@ class ProjectLineEdit(QLineEdit):
         if not self._count:
             self.setPlaceholderText("No shows found")
         elif self._compact:
-            self.setPlaceholderText("Add a show...")
+            # Nothing. The prompt exists to tell you what an empty field is
+            # for; once there are chips in it, the chips say that, and the
+            # words are just something else to read past.
+            self.setPlaceholderText("")
         else:
             self.setPlaceholderText(
                 "Type a show name and press Enter to pin it  (%d available)"

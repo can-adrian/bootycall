@@ -269,6 +269,22 @@ def detect_terminal() -> tuple[str, ...]:
     return ("xterm", "-e")
 
 
+#: Whether a launch prints the resolve before starting the application.
+#:
+#: ``rez-env pkgs`` with no command leaves you in an interactive rez shell, and
+#: rez prints its "requested / resolved packages" table on the way in. ``rez-env
+#: pkgs -- app`` does not: it has a command to run, so there is no shell to
+#: announce anything. That is why Terminal has always shown the table and
+#: Launch has not. Running the app behind ``rez-context`` puts it back.
+SHOW_RESOLVE_INFO = os.environ.get(
+    "BOOTYCALL_SHOW_RESOLVE_INFO", "1"
+).strip().lower() not in ("0", "no", "false", "off")
+
+
+def show_resolve_info() -> bool:
+    return SHOW_RESOLVE_INFO
+
+
 #: When to keep the terminal open after the command finishes:
 #: ``error`` (default), ``always``, or ``never``. A terminal that closes on
 #: failure takes the error message with it, which is the single most annoying
@@ -437,23 +453,6 @@ DCCS: tuple[Dcc, ...] = (
             "nuke16": "Nuke 16.0",
         },
         default_visible=False,
-    ),
-    Dcc(
-        name="nukestudio",
-        version_package="nuke",
-        variant_tags={"nukex": "NukeX"},
-        default_visible=False,
-        label="Nuke Studio",
-        package_group="nuke",
-        icon_text="NS",
-        accent="#d4a72c",
-        keys=("nukestudio", "nuke_studio", "nuke_studio16", "nukex"),
-        variant_labels={
-            "nukestudio": "Nuke Studio",
-            "nuke_studio": "Nuke Studio",
-            "nuke_studio16": "Nuke Studio 16.0",
-            "nukex": "NukeX",
-        },
     ),
     Dcc(
         name="hiero",

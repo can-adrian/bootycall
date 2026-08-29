@@ -9,7 +9,8 @@ is anything worth opening.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
@@ -19,6 +20,29 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+
+class _ElidedLabel(QLabel):
+    """A label that shortens itself rather than being cut off mid-word.
+
+    The header has three things competing for one row: the title, the count,
+    and the override note. In a narrow window something has to give, and it
+    should not be the title -- that is the thing you are looking for. So the
+    count shrinks, with the full text on hover.
+    """
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt API
+        # Small enough to be squeezed, wide enough to be worth reading.
+        hint = super().minimumSizeHint()
+        return QSize(min(hint.width(), 40), hint.height())
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        metrics = painter.fontMetrics()
+        text = metrics.elidedText(self.text(), Qt.ElideRight, self.width())
+        painter.setPen(self.palette().windowText().color())
+        painter.drawText(self.rect(), int(self.alignment()), text)
+        painter.end()
 
 
 class CollapsibleFrame(QWidget):
@@ -65,12 +89,15 @@ class CollapsibleFrame(QWidget):
         self.toggle_button.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
         self.toggle_button.setCursor(Qt.PointingHandCursor)
         self.toggle_button.setFocusPolicy(Qt.TabFocus)
+        self.toggle_button.setSizePolicy(
+            QSizePolicy.Minimum, QSizePolicy.Fixed
+        )
         self.toggle_button.clicked.connect(self.set_expanded)
         header_layout.addWidget(self.toggle_button)
 
         header_layout.addStretch(1)
 
-        self.badge = QLabel("")
+        self.badge = _ElidedLabel("")
         self.badge.setObjectName("collapsibleBadge")
         header_layout.addWidget(self.badge)
 
@@ -133,6 +160,9 @@ class CollapsibleFrame(QWidget):
     def set_badge(self, text: str) -> None:
         """Right-hand count, e.g. ``29 packages``."""
         self.badge.setText(text)
+        # It elides when the header is tight, so the full text has to be
+        # reachable some other way.
+        self.badge.setToolTip(text)
 
     def set_note(self, text: str, level: str = "") -> None:
         """A highlighted note beside the badge, e.g. an override warning."""
