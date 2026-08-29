@@ -15,6 +15,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("BOOTYCALL_SHOWS_ROOT", "/tmp/ice/shows")
 os.environ.setdefault("BOOTYCALL_LOCAL_PACKAGES_ROOT", "/tmp/ice/rez/packages/local/{user}")
 os.environ.setdefault("BOOTYCALL_REZ_USER", "adrian")
+os.environ.setdefault("BOOTYCALL_USER_PACKAGES_ROOT", "/tmp/ice/userpackages")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
@@ -206,7 +207,11 @@ check(
     window._dcc_variant["maya"] == "maya" and window._dcc_buttons["maya"].subtitle() == "2026.3",
     "%s / %s" % (window._dcc_variant["maya"], window._dcc_buttons["maya"].subtitle()),
 )
-check("packages listed (10+4+4+8+3)", window.package_list.count() == 29, str(window.package_list.count()))
+check(
+    "packages listed (10+4+4+8+3, plus the show package)",
+    window.package_list.count() == 30,
+    str(window.package_list.count()),
+)
 check("resolve frame closed by default", not window.resolve_frame.is_expanded())
 check("local frame closed by default", not window.local_frame.is_expanded())
 check("badge reports the count while closed", "29 packages" in window.resolve_frame.badge.text(), window.resolve_frame.badge.text())
@@ -275,7 +280,7 @@ window._dcc_buttons["maya"].click()
 QApplication.processEvents()
 check("maya active", window._active_dcc.name == "maya")
 check("maya-2026.3 first", window.package_list.item(0).text() == "maya-2026.3")
-check("maya package count", window.package_list.count() == 30, str(window.package_list.count()))
+check("maya package count (30 plus the show package)", window.package_list.count() == 31, str(window.package_list.count()))
 shot(window, "05-maya")
 
 print("\ncommand preview")
@@ -708,7 +713,7 @@ print("\nan exclusion that cannot be applied says so")
 launcher._PACKAGES_PATH = None
 os.environ["REZ_PACKAGES_PATH"] = "/ice/rez/packages/int"
 kept, note = launcher.filtered_packages_path(window.excluded_roots())
-check("reports that nothing matched", "nothing changed" in note, note)
+check("reports that nothing matched", "nothing was excluded" in note, note)
 launcher._PACKAGES_PATH = None
 del os.environ["REZ_PACKAGES_PATH"]
 kept, note = launcher.filtered_packages_path(window.excluded_roots())
@@ -1358,14 +1363,19 @@ check("and by shortcut", window.favorites_action.shortcut().toString() == "Ctrl+
 term_pkgs = window.resolved_packages()
 check("terminal uses the selected variant's requests", "nuke-16.0" in term_pkgs, str(term_pkgs[:3]))
 check(
-    "show package appended (its directory exists in the mock tree)",
+    "show package appended",
     term_pkgs[-1] == "show_batman_returns",
     str(term_pkgs[-3:]),
 )
 check(
-    "one more than the resolve list",
-    len(term_pkgs) == window.package_list.count() + 1,
-    "%d vs %d" % (len(term_pkgs), window.package_list.count()),
+    "the resolve list shows exactly what gets resolved, show package included",
+    len(term_pkgs) == window.package_list.count(),
+    "%d requests vs %d rows" % (len(term_pkgs), window.package_list.count()),
+)
+check(
+    "and the show package is the row that says so",
+    "(show package)" in window.package_list.item(window.package_list.count() - 1).text(),
+    window.package_list.item(window.package_list.count() - 1).text(),
 )
 
 term_argv = launcher.build_terminal_command(term_pkgs)
@@ -1394,6 +1404,63 @@ check(
     "show_finishing_only" not in window.resolved_packages(),
     str(window.resolved_packages()),
 )
+
+print("\nshow packages follow the bootstrap's rules")
+from bootycall.discovery import find_show_package, show_package_roots  # noqa: E402
+
+_bat = window._projects_by_name["batman_returns"]
+_found = find_show_package(_bat)
+check("found for a show that has one", _found is not None and _found.name == "show_batman_returns")
+check(
+    "and the root it came from is recorded, since rez needs it on the path",
+    str(_found.root).endswith("batman_returns/.ilp/packages"),
+    str(_found.root),
+)
+
+_dune = window._projects_by_name["dune_pt3"]
+check(
+    "an empty package directory does not count as a package",
+    find_show_package(_dune) is None,
+    "the bootstrap validates; a bare folder would be added to every resolve",
+)
+
+_combat = window._projects_by_name["combat_2"]
+_shadowed = find_show_package(_combat)
+check(
+    "the user's own copy wins over the show's",
+    str(_shadowed.root) == "/tmp/ice/userpackages",
+    str(_shadowed.root),
+)
+check(
+    "both roots are searched, user first",
+    [str(r) for r in show_package_roots(_combat)]
+    == ["/tmp/ice/userpackages", "/tmp/ice/shows/combat_2/.ilp/packages"],
+    str([str(r) for r in show_package_roots(_combat)]),
+)
+
+print("\nthe show package root is added to the packages path")
+_saved = os.environ.get("REZ_PACKAGES_PATH")
+os.environ["REZ_PACKAGES_PATH"] = "/ice/rez/packages/int"
+launcher._PACKAGES_PATH = None
+pin("batman_returns")
+paths, note = launcher.filtered_packages_path(
+    window.excluded_roots(), window.included_roots()
+)
+check("the show's package root is prepended", paths[0] == str(_found.root), str(paths))
+check("ahead of the studio path, so the show's copy wins", paths[1] == "/ice/rez/packages/int", str(paths))
+check("no complaint", note == "", note)
+
+pin("finishing_only")
+paths, note = launcher.filtered_packages_path(
+    window.excluded_roots(), window.included_roots()
+)
+check("nothing added for a show without one", paths == [] and note == "", str(paths))
+if _saved:
+    os.environ["REZ_PACKAGES_PATH"] = _saved
+else:
+    os.environ.pop("REZ_PACKAGES_PATH", None)
+launcher._PACKAGES_PATH = None
+pin("batman_returns")
 unpin_all()
 check("terminal tile disabled with no show", not window.terminal_button.isEnabled())
 check("no packages, no terminal", window.resolved_packages() == ())

@@ -37,6 +37,16 @@ LOCAL_ROOT_TEMPLATE = os.environ.get(
 #: local root, so moving the local root moves this with it by default.
 DEV_ROOT_TEMPLATE = os.environ.get("BOOTYCALL_DEV_PACKAGES_ROOT", "{local}/dev")
 
+#: Where a user's own packages live. The bootstrap's ``_get_show_packages()``
+#: searches this alongside the show's own package directory, and looks here
+#: first -- so a user can shadow a show package with their own copy.
+USER_PACKAGES_ROOT = os.environ.get("BOOTYCALL_USER_PACKAGES_ROOT", "~/packages")
+
+#: Path inside a show that holds its own packages, relative to the show folder.
+SHOW_PACKAGES_SUBPATH = os.environ.get(
+    "BOOTYCALL_SHOW_PACKAGES_SUBPATH", ".ilp/packages"
+)
+
 #: Directory names that are never a package, whatever root they turn up in.
 #: ``dev`` is a package root nested inside the local root; treating it as a
 #: reserved name is cheaper and clearer than special-casing the parent scan,
@@ -79,6 +89,10 @@ def path_setting(key: str) -> str:
 
 def shows_root() -> str:
     return path_setting("shows_root")
+
+
+def user_packages_root() -> str:
+    return os.path.expanduser(USER_PACKAGES_ROOT)
 
 
 def local_root_template() -> str:

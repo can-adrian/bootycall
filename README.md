@@ -331,11 +331,32 @@ The executable is per **DCC**, not per variant: variants differ in what packages
 are stacked into the environment, not in what gets run. Maya on the Ziva build
 still runs `maya`.
 
-The show's own `show_<name>` package is appended to both when
-`<show>/.ilp/packages/show_<name>` exists, because `_get_show_packages()` adds it
-to every resolve — leaving it out would give you an environment subtly unlike
-the one the show expects. BootyCall can't run rez's validator from here, so it
-checks the directory exists rather than guessing.
+### The show's own package
+
+The bootstrap's `_get_show_packages()` appends a package named `show_<folder>`
+to every resolve, so BootyCall does the same — leaving it out would give you an
+environment subtly unlike the one the show expects. It appears at the end of the
+Resolved packages list, marked `(show package)`.
+
+Two roots are searched, in the bootstrap's order:
+
+1. `~/packages` (`BOOTYCALL_USER_PACKAGES_ROOT`)
+2. `<show>/.ilp/packages` (`BOOTYCALL_SHOW_PACKAGES_SUBPATH`)
+
+User first, because that ordering is what lets someone shadow a show package
+with their own copy — reversing it would quietly break a supported workflow.
+
+The bootstrap searches with `validate=True` and skips anything rez rejects.
+BootyCall can't run that validator, so it makes the check it can: a directory
+with an actual package definition in it, versioned or not. That's much closer to
+the bootstrap's answer than a bare directory test, which would happily add an
+empty folder to every resolve.
+
+**The root it was found under is prepended to `REZ_PACKAGES_PATH` for the
+launch.** A show package lives somewhere rez has no reason to know about, so
+requesting it without adding that root would simply fail to resolve. Prepending
+rather than appending is deliberate: a show's own copy of a package should win
+over the studio one, and the user's copy over both.
 
 **Terminal** is not part of the exclusive DCC group — it's an action, not one of
 the show's software choices — so it's drawn with a dashed border and stays

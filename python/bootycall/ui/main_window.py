@@ -40,9 +40,9 @@ from ..discovery import (
     ProjectsUnavailable,
     available_dccs,
     list_projects,
+    find_show_package,
     load_bootstrap,
     newest_variant,
-    show_package,
     variant_version,
 )
 from ..local_packages import (
@@ -1006,6 +1006,18 @@ class MainWindow(QMainWindow):
                 item.setToolTip("\n".join(tips))
             self.package_list.addItem(item)
 
+        show_pkg = self.show_package()
+        if show_pkg is not None:
+            # It is part of every resolve, so a list claiming to be the resolve
+            # has to say so.
+            item = QListWidgetItem("%s      (show package)" % show_pkg.name)
+            item.setForeground(QColor("#8fce8f"))
+            item.setToolTip(
+                "%s\nFound under %s, which is added to the packages path for "
+                "the launch." % (show_pkg.path, show_pkg.root)
+            )
+            self.package_list.addItem(item)
+
         duplicates = len(packages) - len(seen)
         badge = "%s  -  %d packages" % (key, len(packages))
         if duplicates:
@@ -1331,7 +1343,9 @@ class MainWindow(QMainWindow):
         else:
             self._refresh_override_marks()
 
-        _kept, note = launcher.filtered_packages_path(self.excluded_roots())
+        _kept, note = launcher.filtered_packages_path(
+            self.excluded_roots(), self.included_roots()
+        )
         if note:
             self.statusBar().showMessage(note, 10000)
 
@@ -1430,10 +1444,27 @@ class MainWindow(QMainWindow):
         if project is None or self._bootstrap is None or tool is None:
             return ()
         packages = tuple(self._bootstrap.packages.get(tool, ()))
-        show_pkg = show_package(project)
-        if show_pkg:
-            packages += (show_pkg,)
+        show_pkg = self.show_package()
+        if show_pkg is not None:
+            packages += (show_pkg.name,)
         return packages
+
+    def show_package(self):
+        """The selected show's own package, if it has one."""
+        project = self.current_project()
+        if project is None:
+            return None
+        return find_show_package(project)
+
+    def included_roots(self) -> tuple[str, ...]:
+        """Package roots the resolve needs that rez may not know about.
+
+        A show package lives under the show, or under the user's own package
+        directory. Requesting it without putting that root on the path would
+        fail to resolve.
+        """
+        show_pkg = self.show_package()
+        return (str(show_pkg.root),) if show_pkg is not None else ()
 
     def _on_open_terminal(self) -> None:
         project = self.current_project()
@@ -1444,7 +1475,9 @@ class MainWindow(QMainWindow):
             )
             return
         try:
-            launcher.open_terminal(project, packages, self.excluded_roots())
+            launcher.open_terminal(
+                project, packages, self.excluded_roots(), self.included_roots()
+            )
         except OSError as exc:
             QMessageBox.critical(
                 self,
@@ -1697,7 +1730,13 @@ class MainWindow(QMainWindow):
         packages = self.resolved_packages()
         command = self._active_dcc.run_command
         try:
-            launcher.launch(project, packages, command, self.excluded_roots())
+            launcher.launch(
+                project,
+                packages,
+                command,
+                self.excluded_roots(),
+                self.included_roots(),
+            )
         except OSError as exc:
             QMessageBox.critical(
                 self,

@@ -15,7 +15,12 @@ from pathlib import Path
 from typing import Sequence
 
 from . import config
-from .local_packages import request_name, version_key
+from .local_packages import (
+    LocalPackagesUnavailable,
+    list_local_packages,
+    request_name,
+    version_key,
+)
 from .parser import Bootstrap, BootstrapParseError, parse_file
 
 
@@ -172,16 +177,46 @@ def newest_variant(
     return best
 
 
-def show_package(project: Project) -> str | None:
-    """The show's own rez package, if it has one.
+@dataclass(frozen=True)
+class ShowPackage:
+    """A show's own rez package, and the package root it was found under."""
 
-    The bootstrap's ``_get_show_packages()`` looks for a package named
-    ``show_<folder>`` under ``<show>/.ilp/packages`` and appends it to every
-    resolve. We can't run rez's validator from here, but we can check the
-    directory exists, which is enough to include it in a terminal request
-    instead of silently dropping it.
+    name: str
+    #: The package path rez needs to see in order to resolve it.
+    root: Path
+    #: The package directory itself.
+    path: Path
+
+
+def show_package_roots(project: Project) -> list[Path]:
+    """Where a show package may live, in the order the bootstrap searches.
+
+    The user's own packages come first, mirroring ``_get_show_packages()``:
+    that ordering is what lets someone shadow a show package with their own
+    copy, so reversing it would quietly break a supported workflow.
+    """
+    return [
+        Path(config.user_packages_root()),
+        project.path / Path(config.SHOW_PACKAGES_SUBPATH),
+    ]
+
+
+def find_show_package(project: Project) -> ShowPackage | None:
+    """The show's own package, if one exists and looks real.
+
+    The bootstrap searches with ``validate=True`` and skips anything that fails
+    rez's validator. BootyCall cannot run that validator, so it settles for the
+    check it can make: a directory with an actual package definition in it,
+    versioned or not. That is much closer to the bootstrap's answer than a bare
+    directory test, which would happily add an empty folder to every resolve.
     """
     name = "show_%s" % project.name
-    if (project.path / ".ilp" / "packages" / name).is_dir():
-        return name
+    for root in show_package_roots(project):
+        try:
+            found = list_local_packages(root)
+        except LocalPackagesUnavailable:
+            continue
+        for package in found:
+            if package.name == name:
+                return ShowPackage(name=name, root=root, path=package.path)
     return None

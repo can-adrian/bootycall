@@ -77,33 +77,50 @@ def _ask_rez_for_packages_path() -> list[str]:
     return paths
 
 
-def filtered_packages_path(exclude: Sequence[str]) -> tuple[list[str], str]:
-    """The packages path with ``exclude`` removed. Returns ``(paths, note)``.
+def filtered_packages_path(
+    exclude: Sequence[str] = (), include: Sequence[str] = ()
+) -> tuple[list[str], str]:
+    """The packages path with ``exclude`` removed and ``include`` prepended.
 
-    ``note`` is non-empty when the exclusion could not be applied, so the
-    caller can say so rather than launching an environment that quietly still
-    contains what the user switched off.
+    Returns ``(paths, note)``. ``note`` is non-empty when the change could not
+    be applied, so the caller can say so rather than launching an environment
+    that quietly still contains what was switched off -- or one that is missing
+    a root a request depends on.
+
+    ``include`` is prepended because that is where a more specific package root
+    belongs: a show's own copy of a package should win over the studio one, and
+    the user's own copy over both.
     """
-    if not exclude:
+    if not exclude and not include:
         return [], ""
 
     current = packages_path()
     if not current:
+        # Replacing the whole variable from nothing would drop the site's
+        # defaults, which is far worse than not applying the change.
         return [], (
-            "could not read the rez packages path, so nothing was excluded - "
+            "could not read the rez packages path, so it was left alone - "
             "set REZ_PACKAGES_PATH or make rez-config available"
         )
 
-    wanted = [os.path.normpath(p) for p in exclude]
-    kept = [p for p in current if os.path.normpath(p) not in wanted]
-    if len(kept) == len(current):
+    unwanted = {os.path.normpath(p) for p in exclude}
+    kept = [p for p in current if os.path.normpath(p) not in unwanted]
+    missed = exclude and len(kept) == len(current)
+
+    known = {os.path.normpath(p) for p in kept}
+    extra = [
+        p for p in include if os.path.normpath(p) not in known and os.path.isdir(p)
+    ]
+    paths = extra + kept
+
+    if missed:
         # Nothing matched: the roots BootyCall shows are not the ones rez is
         # actually reading, which is worth saying out loud.
-        return kept, (
+        return paths, (
             "none of the excluded roots are on the rez packages path; "
-            "nothing changed"
+            "nothing was excluded"
         )
-    return kept, ""
+    return paths, ""
 
 
 def rez_argv(packages: Sequence[str], command: str = "") -> list[str]:
@@ -202,26 +219,41 @@ def launch(
     packages: Sequence[str],
     command: str,
     exclude_roots: Sequence[str] = (),
+    include_roots: Sequence[str] = (),
     dry_run: bool = False,
 ) -> subprocess.Popen | None:
     """Resolve ``packages`` and start ``command``, detached."""
-    return _spawn(project, build_command(packages, command), exclude_roots, dry_run)
+    return _spawn(
+        project,
+        build_command(packages, command),
+        exclude_roots,
+        include_roots,
+        dry_run,
+    )
 
 
 def open_terminal(
     project: Project,
     packages: Sequence[str],
     exclude_roots: Sequence[str] = (),
+    include_roots: Sequence[str] = (),
     dry_run: bool = False,
 ) -> subprocess.Popen | None:
     """Open a shell resolved against ``packages``, detached."""
-    return _spawn(project, build_terminal_command(packages), exclude_roots, dry_run)
+    return _spawn(
+        project,
+        build_terminal_command(packages),
+        exclude_roots,
+        include_roots,
+        dry_run,
+    )
 
 
 def _spawn(
     project: Project,
     argv: list[str],
     exclude_roots: Sequence[str] = (),
+    include_roots: Sequence[str] = (),
     dry_run: bool = False,
 ) -> subprocess.Popen | None:
     if dry_run:
@@ -231,13 +263,14 @@ def _spawn(
     env["ILP_SHOW"] = project.name
     env["BOOTYCALL_SHOW"] = project.name
 
-    # Switching off a package section means its packages must not reach the
-    # resolve. They are not in the request -- they arrive through the packages
-    # path -- so the only way to exclude them is to hand the child a path that
-    # does not contain their root.
-    kept, _note = filtered_packages_path(exclude_roots)
-    if kept:
-        env["REZ_PACKAGES_PATH"] = os.pathsep.join(kept)
+    # Two reasons to rewrite the path. Switching off a package section means
+    # its packages must not reach the resolve, and they are not in the request
+    # -- they arrive through the packages path. And a show package lives under
+    # a root rez has no reason to know about, so requesting it without adding
+    # that root would fail to resolve.
+    paths, _note = filtered_packages_path(exclude_roots, include_roots)
+    if paths:
+        env["REZ_PACKAGES_PATH"] = os.pathsep.join(paths)
 
     kwargs: dict = {
         # The show folder as cwd: a bootstrap's __file__-relative lookups and
