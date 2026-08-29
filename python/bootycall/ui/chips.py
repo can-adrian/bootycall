@@ -29,6 +29,11 @@ from .completer import ProjectLineEdit
 from .flow_layout import FlowLayout
 
 
+#: Chip height. The stylesheet's border-radius is half this, so the ends are
+#: true semicircles rather than rounded corners.
+CHIP_HEIGHT = 24
+
+
 class ShowChip(QWidget):
     """One pinned show: click the body to select, click the ✕ to unpin."""
 
@@ -45,8 +50,13 @@ class ShowChip(QWidget):
         self.setFocusPolicy(Qt.TabFocus)
         self.setProperty("selected", False)
 
+        # Fixed height so the corner radius can be exactly half of it: a
+        # radius smaller than half draws a rounded rectangle, and how tall the
+        # chip would otherwise be depends on the workstation's font.
+        self.setFixedHeight(CHIP_HEIGHT)
+
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 3, 4, 3)
+        layout.setContentsMargins(11, 0, 5, 0)
         layout.setSpacing(6)
 
         self.label = QLabel(name)

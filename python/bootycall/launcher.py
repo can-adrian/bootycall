@@ -22,16 +22,56 @@ from . import config
 from .discovery import Project
 
 
-def expand(template: Sequence[str], packages: Sequence[str], command: str = "") -> list[str]:
+def rez_argv(packages: Sequence[str], command: str = "") -> list[str]:
+    """The rez invocation itself, without a terminal around it."""
+    argv = ["rez-env", *packages]
+    if command:
+        argv += ["--", command]
+    return argv
+
+
+def build_script(packages: Sequence[str], command: str = "") -> str:
+    """A shell one-liner that echoes the command, runs it, and holds on failure.
+
+    The window closing on failure is the single most annoying way for a
+    launcher to break: the error is written and then thrown away faster than
+    anyone can read it. So the script prints what it is about to run, and on a
+    non-zero exit says so and waits for Enter.
+
+    Echoing the command is worth the line on its own -- when a resolve fails,
+    the first question is always what was actually asked for.
+    """
+    inner = " ".join(shlex.quote(part) for part in rez_argv(packages, command))
+    hold = config.HOLD_TERMINAL
+
+    if hold == "never":
+        return inner
+
+    condition = 'true' if hold == "always" else '[ "$rc" -ne 0 ]'
+    return (
+        'echo "+ {inner}"; echo; '
+        "{inner}; rc=$?; "
+        'if {condition}; then echo; '
+        'echo "BootyCall: command exited with status $rc"; '
+        'read -r -p "Press Enter to close this window... " _; fi'
+    ).format(inner=inner, condition=condition)
+
+
+def expand(
+    template: Sequence[str], packages: Sequence[str], command: str = ""
+) -> list[str]:
     """Build an argv from ``template``.
 
+    ``{script}`` becomes the shell one-liner from :func:`build_script`.
     ``{packages}`` becomes one argument per request rather than a single
     space-joined string, so requests survive as separate argv entries.
     ``{command}`` becomes the executable to run in the resolved context.
     """
     argv: list[str] = []
     for part in template:
-        if "{packages}" in part:
+        if "{script}" in part:
+            argv.append(build_script(packages, command))
+        elif "{packages}" in part:
             argv.extend(packages)
         elif "{command}" in part:
             if not command:

@@ -239,9 +239,42 @@ check(
 
 print("\nlaunch template")
 check("launch opens a terminal", config.LAUNCH_COMMAND[0] == detected[0], str(config.LAUNCH_COMMAND[:2]))
-check("launch resolves with rez", "rez-env" in config.LAUNCH_COMMAND)
-check("launch takes packages and a command", "{packages}" in config.LAUNCH_COMMAND and "{command}" in config.LAUNCH_COMMAND)
-check("terminal takes packages but no command", "{packages}" in config.TERMINAL_COMMAND and "{command}" not in config.TERMINAL_COMMAND)
+check(
+    "and runs a shell script in it, so the window can be held open",
+    config.LAUNCH_COMMAND[-3:] == ("bash", "-c", "{script}"),
+    str(config.LAUNCH_COMMAND[-3:]),
+)
+check(
+    "the terminal action uses the same shape",
+    config.TERMINAL_COMMAND[-3:] == ("bash", "-c", "{script}"),
+    str(config.TERMINAL_COMMAND[-3:]),
+)
+check(
+    "hold defaults to on-error, not always",
+    config.HOLD_TERMINAL == "error",
+    config.HOLD_TERMINAL,
+)
+
+print("\nthe script itself")
+check(
+    "rez_argv puts the executable after --",
+    launcher.rez_argv(("a-1", "b-2"), "maya") == ["rez-env", "a-1", "b-2", "--", "maya"],
+    str(launcher.rez_argv(("a-1", "b-2"), "maya")),
+)
+check(
+    "and omits it entirely for a shell",
+    launcher.rez_argv(("a-1",)) == ["rez-env", "a-1"],
+    str(launcher.rez_argv(("a-1",))),
+)
+_script = launcher.build_script(("a-1",), "maya")
+check("the command is echoed first", _script.startswith('echo "+ rez-env a-1 -- maya"'), _script[:60])
+check("the status is captured and reported", "rc=$?" in _script and "$rc" in _script)
+check("and the window waits before closing", "read -r -p" in _script)
+check(
+    "requests with spaces are quoted, not split",
+    "'a b-1'" in launcher.build_script(("a b-1",), "maya"),
+    launcher.build_script(("a b-1",), "maya")[:70],
+)
 
 print()
 if failures:

@@ -44,5 +44,10 @@ def commands():
     #
     # Or replace the whole command, if your site wraps the launch:
     #
-    # env.BOOTYCALL_LAUNCH_COMMAND = "gnome-terminal:--:rez-env:{packages}:--:{command}"
-    # env.BOOTYCALL_TERMINAL_COMMAND = "gnome-terminal:--:rez-env:{packages}"
+    # env.BOOTYCALL_LAUNCH_COMMAND = "gnome-terminal:--:bash:-c:{script}"
+    # env.BOOTYCALL_TERMINAL_COMMAND = "gnome-terminal:--:bash:-c:{script}"
+    #
+    # When to keep the window open after the command finishes: error, always,
+    # never. "always" is useful while getting a site's settings right.
+    #
+    # env.BOOTYCALL_HOLD_TERMINAL = "error"

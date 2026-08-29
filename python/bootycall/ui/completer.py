@@ -9,7 +9,7 @@ who don't remember the exact show code.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import QCompleter, QLineEdit
 
@@ -94,10 +94,9 @@ class ProjectLineEdit(QLineEdit):
 
     # -- behaviour ---------------------------------------------------------
 
-    def focusInEvent(self, event) -> None:
-        super().focusInEvent(event)
-        if not self.text():
-            self._show_all()
+    # No popup on focus: the window focuses this field on startup so you can
+    # type straight away, and a list unfurling over the UI unasked reads as a
+    # glitch. Clicking it or pressing Down still opens it.
 
     def mousePressEvent(self, event) -> None:
         super().mousePressEvent(event)
@@ -123,8 +122,13 @@ class ProjectLineEdit(QLineEdit):
     def _on_completer_activated(self, text: str) -> None:
         self.setText(text)
         self._revalidate()
-        if self._current is not None:
-            self.projectActivated.emit(self._current)
+        project = self._current
+        if project is None:
+            return
+        # Deferred by one turn: QCompleter writes the chosen text into the line
+        # edit through its own connection *after* this slot returns, so pinning
+        # here would be immediately undone by that write.
+        QTimer.singleShot(0, lambda: self.projectActivated.emit(project))
 
     def _on_return_pressed(self) -> None:
         # Enter on an exact-but-unselected match should still count.

@@ -144,9 +144,21 @@ def detect_terminal() -> tuple[str, ...]:
     return ("xterm", "-e")
 
 
+#: When to keep the terminal open after the command finishes:
+#: ``error`` (default), ``always``, or ``never``. A terminal that closes on
+#: failure takes the error message with it, which is the single most annoying
+#: way for a launcher to break.
+HOLD_TERMINAL = os.environ.get("BOOTYCALL_HOLD_TERMINAL", "error").strip().lower()
+
+
 #: Argv template for launching a DCC: resolve the context, open a terminal, run
-#: the application in it. ``{packages}`` expands to the resolved requests as
-#: separate arguments and ``{command}`` to the DCC's executable.
+#: the application in it.
+#:
+#: ``{script}`` expands to a shell one-liner that echoes the command, runs it,
+#: and holds the window open per :data:`HOLD_TERMINAL`. ``{packages}`` and
+#: ``{command}`` are still available for sites that want the bare argv instead:
+#: ``{packages}`` becomes one argument per request, ``{command}`` the
+#: executable.
 #:
 #: Both templates go straight to rez rather than through the show's bootstrap.
 #: BootyCall already knows the exact request list, so routing it back through a
@@ -156,7 +168,7 @@ def detect_terminal() -> tuple[str, ...]:
 LAUNCH_COMMAND: Sequence[str] = tuple(
     os.environ["BOOTYCALL_LAUNCH_COMMAND"].split(":")
     if os.environ.get("BOOTYCALL_LAUNCH_COMMAND")
-    else detect_terminal() + ("rez-env", "{packages}", "--", "{command}")
+    else detect_terminal() + ("bash", "-c", "{script}")
 )
 
 #: The same, without an application: an interactive shell in the resolve.
@@ -165,7 +177,7 @@ LAUNCH_COMMAND: Sequence[str] = tuple(
 TERMINAL_COMMAND: Sequence[str] = tuple(
     os.environ["BOOTYCALL_TERMINAL_COMMAND"].split(":")
     if os.environ.get("BOOTYCALL_TERMINAL_COMMAND")
-    else detect_terminal() + ("rez-env", "{packages}")
+    else detect_terminal() + ("bash", "-c", "{script}")
 )
 
 

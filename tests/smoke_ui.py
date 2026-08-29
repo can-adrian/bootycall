@@ -87,6 +87,17 @@ check("no DCC buttons before a show is picked", not window._dcc_buttons)
 check("launch disabled", not window.launch_button.isEnabled())
 shot(window, "01-empty")
 
+print("\nthe autocomplete does not open itself")
+check(
+    "focused at startup so you can type straight away",
+    window.project_field.hasFocus(),
+)
+check(
+    "but the popup is not showing",
+    not window.project_field._completer.popup().isVisible(),
+    "a list unfurling over the UI unasked reads as a glitch",
+)
+
 print("\nsubstring autocomplete")
 window.project_field.setText("bat")
 QApplication.processEvents()
@@ -115,6 +126,39 @@ check("no chip while typing 'bat'", window.chip_bar.names() == [], str(window.ch
 check("no selection", window.current_project() is None)
 check("entry text marked bad", window.project_field.property("state") == "bad")
 check("launch still disabled", not window.launch_button.isEnabled())
+
+print("\nclicking a completion pins it")
+window.project_field.clear()
+window.project_field.setText("dune")
+QApplication.processEvents()
+window.project_field._completer.activated[str].emit("dune_pt3")
+for _ in range(3):
+    QApplication.processEvents()
+check(
+    "the chip appears from one click, no Enter needed",
+    "dune_pt3" in window.chip_bar.names(),
+    str(window.chip_bar.names()),
+)
+check("and is selected", window.chip_bar.selected_name() == "dune_pt3")
+check(
+    "the field cleared, rather than keeping the text the completer wrote back",
+    window.project_field.text() == "",
+    window.project_field.text(),
+)
+unpin_all()
+
+print("\nchips are pills")
+pin("batman_returns")
+_chip = window.chip_bar.chip("batman_returns")
+from bootycall.ui.chips import CHIP_HEIGHT  # noqa: E402
+
+check("fixed height", _chip.height() == CHIP_HEIGHT, str(_chip.height()))
+check(
+    "and the stylesheet radius is exactly half of it",
+    "border-radius: %dpx" % (CHIP_HEIGHT // 2) in apply_style.__globals__["STYLESHEET"].split("QWidget#showChip")[1][:200],
+    "a radius under half draws a rounded rectangle, not a pill",
+)
+unpin_all()
 
 print("\nfull show selected")
 pin("batman_returns")
@@ -241,8 +285,13 @@ preview = launcher.command_preview(
     window.current_project(), window.resolved_packages(), window._active_dcc.run_command
 )
 check("preview mentions show path", "/tmp/ice/shows/batman_returns" in preview, preview)
-check("preview ends with the DCC executable", preview.endswith("maya"), preview)
-check("and resolves through rez", "rez-env" in preview, preview)
+check(
+    "preview runs the DCC executable",
+    launcher.rez_argv(window.resolved_packages(), window._active_dcc.run_command)[-2:]
+    == ["--", "maya"],
+    str(launcher.rez_argv(window.resolved_packages(), "maya")[-2:]),
+)
+check("and resolves through rez", "rez-env" in preview, preview[:80])
 print("       %s" % preview[:120])
 
 print("\nshow with only some DCCs")
@@ -1105,36 +1154,65 @@ for _name in ("maya", "nuke", "hiero", "blender", "nukestudio"):
 window._dcc_buttons["nuke"].click()
 QApplication.processEvents()
 launch_argv = launcher.build_command(window.resolved_packages(), window._active_dcc.run_command)
+script = launch_argv[-1]
 check(
     "opens whichever terminal emulator this host has",
     launch_argv[0] == _cfg.detect_terminal()[0],
     "%s vs detected %s" % (launch_argv[0], _cfg.detect_terminal()[0]),
 )
-check("resolves with rez", "rez-env" in launch_argv, str(launch_argv[:4]))
-check("the executable comes last", launch_argv[-1] == "nuke", str(launch_argv[-3:]))
-check("separated from the requests", launch_argv[-2] == "--", str(launch_argv[-3:]))
+check("runs it through a shell", launch_argv[-3:-1] == ["bash", "-c"], str(launch_argv[-3:-1]))
+check("resolves with rez", "rez-env " in script, script[:80])
 check(
-    "requests are separate argv entries",
-    "nuke-16.0" in launch_argv and "base-6" in launch_argv,
-    str(launch_argv[:6]),
+    "the executable comes last in the command",
+    launcher.rez_argv(window.resolved_packages(), "nuke")[-2:] == ["--", "nuke"],
+)
+check(
+    "requests are in the command",
+    "nuke-16.0" in script and "base-6" in script,
+    script[:120],
 )
 check(
     "the show package rides along, as it does for the terminal",
-    "show_batman_returns" in launch_argv,
-    str(launch_argv[-4:]),
+    "show_batman_returns" in script,
+    script[:160],
 )
+
+print("\nthe terminal is held open when the command fails")
+check("the command is echoed before it runs", script.startswith('echo "+ rez-env'), script[:40])
+check("the exit status is captured", "rc=$?" in script, script[-160:])
+check("and reported", "exited with status $rc" in script, script[-160:])
+check("with a pause so it can be read", "read -r -p" in script, script[-80:])
 check(
-    "one argv entry per request plus the wrapper",
-    len(launch_argv) == 5 + len(window.resolved_packages()),
-    "%d argv for %d packages" % (len(launch_argv), len(window.resolved_packages())),
+    "held only on failure by default, not on every launch",
+    '[ "$rc" -ne 0 ]' in script,
+    script[-160:],
+)
+
+_hold = _cfg.HOLD_TERMINAL
+_cfg.HOLD_TERMINAL = "never"
+check(
+    "hold=never gives the bare command, no wrapper",
+    launcher.build_script(("a-1",), "maya") == "rez-env a-1 -- maya",
+    launcher.build_script(("a-1",), "maya"),
+)
+_cfg.HOLD_TERMINAL = "always"
+check("hold=always holds unconditionally", "if true; then" in launcher.build_script(("a-1",), "maya"))
+_cfg.HOLD_TERMINAL = _hold
+
+print("\nquoting")
+check(
+    "a request with a space cannot split into two arguments",
+    "'a b-1'" in launcher.build_script(("a b-1",), "maya"),
+    launcher.build_script(("a b-1",), "maya")[:80],
 )
 
 window._dcc_buttons["houdinifx"].click()
 QApplication.processEvents()
 check(
     "switching DCC changes the executable, not just the packages",
-    launcher.build_command(window.resolved_packages(), window._active_dcc.run_command)[-1]
-    == "houdini",
+    launcher.rez_argv(
+        window.resolved_packages(), window._active_dcc.run_command
+    )[-1] == "houdini",
 )
 window._dcc_buttons["nuke"].click()
 QApplication.processEvents()
@@ -1169,21 +1247,22 @@ check(
 )
 
 term_argv = launcher.build_terminal_command(term_pkgs)
+term_script = term_argv[-1]
 check(
     "terminal argv starts with the same emulator",
     term_argv[0] == _cfg.detect_terminal()[0],
     str(term_argv[:3]),
 )
-check("goes to rez-env", "rez-env" in term_argv, str(term_argv[:4]))
-check(
-    "packages expand to separate argv entries, not one blob",
-    term_argv.count("nuke-16.0") == 1 and len(term_argv) == 3 + len(term_pkgs),
-    "%d argv for %d packages" % (len(term_argv), len(term_pkgs)),
-)
+check("goes to rez-env", "rez-env " in term_script, term_script[:60])
 check(
     "no application, and no dangling -- either",
-    term_argv[-1] != "--" and "--" not in term_argv,
-    str(term_argv[-3:]),
+    "--" not in launcher.rez_argv(term_pkgs),
+    str(launcher.rez_argv(term_pkgs)[-2:]),
+)
+check(
+    "every request is in the command",
+    all(p in term_script for p in term_pkgs),
+    term_script[:120],
 )
 print("       %s" % launcher.terminal_preview(window.current_project(), term_pkgs)[:110] + " ...")
 

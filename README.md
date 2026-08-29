@@ -44,8 +44,9 @@ The tagline under the logo is drawn at random each launch from
 
 1. Lists every show folder under `/ice/shows/` into an autocomplete field.
    Matching is substring and case-insensitive — typing `mba` finds `combat_2`,
-   typing `orc` finds `ORCA_ep01`. The popup opens on focus and on Down, so it
-   also works as a browser when you can't remember the show code.
+   typing `orc` finds `ORCA_ep01`. The popup opens when you click the field or press
+   Down, so it also works as a browser when you can't remember the show code —
+   but never on its own, so it can't unfurl over the UI at startup.
 2. **Enter pins the show as a chip.** The chips are your shortlist; one is
    selected at a time, and that selection is what the rest of the window
    describes. Finds the selected show's bootstrap and reads its `packages`.
@@ -70,8 +71,9 @@ same wrapping row.
 └───────────────────────────────────────────────────────┘
 ```
 
-Typing a show and pressing Enter pins it; clicking a chip selects it, clicking
-its ✕ unpins it. Exactly one chip is selected, because everything under the
+Typing a show and pressing Enter pins it, and so does clicking one in the
+autocomplete list — one click, no Enter afterwards. Clicking a chip selects it,
+clicking its ✕ unpins it. Exactly one chip is selected, because everything under the
 field — DCC, variant, package list, Launch — describes a single show.
 
 The entry takes whatever width the chips leave and drops to a new line when they
@@ -254,6 +256,28 @@ GNOME is first because Rocky and RHEL default to it, and it's invoked with `--`
 rather than the `-e` that newer versions removed. If nothing is found it falls
 back to `xterm`, so the failure names a program that's missing rather than dying
 somewhere less legible.
+
+### When it fails
+
+The command runs inside a shell that **echoes what it is about to run** and,
+on a non-zero exit, says so and waits for Enter:
+
+```
++ rez-env nuke-16.0 base-6 ... show_batman_returns -- nuke
+
+<the error>
+
+BootyCall: command exited with status 1
+Press Enter to close this window...
+```
+
+A terminal that closes on failure takes the error with it, which is the single
+most annoying way for a launcher to break. `BOOTYCALL_HOLD_TERMINAL` takes
+`error` (default), `always` — useful while you're getting a site's settings
+right — or `never` for the bare command.
+
+Requests are shell-quoted, so one containing a space can't split into two
+arguments.
 
 `BOOTYCALL_TERMINAL_EMULATOR=konsole:-e` forces the emulator while keeping the
 rest of the command; `BOOTYCALL_LAUNCH_COMMAND` / `BOOTYCALL_TERMINAL_COMMAND`
@@ -533,8 +557,9 @@ the ones below, and are handy for pointing a session at a test tree:
 | `BOOTYCALL_SHOWS_ROOT` | `/ice/shows` |
 | `BOOTYCALL_BOOTSTRAP_GLOBS` | `.ilp/pipeline/*.py:.ilp/bootstrap/*.py:.ilp/*/*.py:.ilp/*.py` |
 | `BOOTYCALL_TERMINAL_EMULATOR` | first of gnome-terminal, konsole, xfce4-terminal, alacritty, kitty, xterm found on PATH |
-| `BOOTYCALL_LAUNCH_COMMAND` | `<detected terminal> rez-env {packages} -- {command}` |
-| `BOOTYCALL_TERMINAL_COMMAND` | `<detected terminal> rez-env {packages}` |
+| `BOOTYCALL_HOLD_TERMINAL` | `error` (also `always`, `never`) |
+| `BOOTYCALL_LAUNCH_COMMAND` | `<detected terminal> bash -c {script}` |
+| `BOOTYCALL_TERMINAL_COMMAND` | `<detected terminal> bash -c {script}` |
 | `BOOTYCALL_CONFIG_FILE` | `$XDG_CONFIG_HOME/bootycall/configs.json` |
 | `BOOTYCALL_LOCAL_PACKAGES_ROOT` | `/ice/rez/packages/local/{user}` |
 | `BOOTYCALL_DEV_PACKAGES_ROOT` | `{local}/dev` |

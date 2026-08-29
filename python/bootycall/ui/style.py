@@ -164,8 +164,8 @@ QToolButton#actionTile:disabled { color: #4d525a; border-color: #2c3037; }
 QWidget#showChip {
     background: #2b2f36;
     border: 1px solid #3a3f47;
-    /* Half the chip's height, so the ends are true semicircles. */
-    border-radius: 13px;
+    /* Exactly half of chips.CHIP_HEIGHT, so the ends are true semicircles. */
+    border-radius: 12px;
 }
 QWidget#showChip[hover="true"]    { border-color: #4a5058; }
 QWidget#showChip[selected="true"] { background: #2f4a68; border-color: #4a90d9; }
