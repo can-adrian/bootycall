@@ -1,0 +1,11 @@
+# Normalise to LF in the repository. Git for Windows defaults core.autocrlf to
+# true, and without this a commit made on Windows can put CRLF into files that
+# have to run on Linux -- bin/bootycall's shebang stops working the moment its
+# first line ends \r\n, with an error that names the interpreter and not the
+# line ending.
+* text=auto eol=lf
+
+# Binary, never touched.
+*.png binary
+*.jpg binary
+*.ico binary
