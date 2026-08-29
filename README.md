@@ -109,10 +109,32 @@ All closed on startup — the resolve alone is 30-odd lines you rarely need — 
 each header carries a badge so it still reports what's inside while shut:
 
 ```
-▸ Resolved packages                      nuke - 30 packages   2 overridden locally
-▸ Local packages                              4 packages      1 in use
-▸ Dev packages                                8 packages      1 in use
+☑ ▸ Resolved packages                    nuke - 30 packages   2 overridden locally
+☑ ▸ Local packages                            4 packages      1 in use
+☑ ▸ Dev packages                              8 packages      1 in use
 ```
+
+### Switching a section off
+
+The checkbox decides whether that section's packages are **in play**. All three
+start checked; Resolved is locked on, since there is nothing to launch without
+it.
+
+Unchecking is not cosmetic. Local and dev packages never appear in the request —
+they reach a resolve through `REZ_PACKAGES_PATH` — so the only honest way to
+exclude them is to hand the launched process a path with their root removed,
+which is what BootyCall does. The section's list greys out, its header reads
+*not used*, and it stops claiming to override anything, because it no longer
+does.
+
+The path is read from `REZ_PACKAGES_PATH`, or from `rez-config packages_path`
+if that isn't set (asked once, then cached). If neither is available, or the
+roots BootyCall shows turn out not to be on rez's path at all, it **says so in
+the status bar** rather than launching an environment that quietly still
+contains what you switched off.
+
+Both switches persist. Only the *off* state is written, so a config file with
+neither key means both on.
 
 Opening a section grows the window if it would otherwise squash the list;
 closing never shrinks it, since that would undo a size you chose.

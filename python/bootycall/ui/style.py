@@ -233,6 +233,9 @@ QToolButton#collapsibleToggle {
 QToolButton#collapsibleToggle:hover   { color: #ffffff; }
 QToolButton#collapsibleToggle:checked { color: #eef1f5; }
 
+QCheckBox#collapsibleCheck { background: transparent; spacing: 0; }
+QCheckBox#collapsibleCheck::indicator { width: 14px; height: 14px; }
+
 QLabel#collapsibleBadge { color: #767c86; font-size: 11px; background: transparent; }
 QLabel#collapsibleNote {
     color: #767c86;

@@ -280,6 +280,7 @@ shot(window, "05-maya")
 
 print("\ncommand preview")
 from bootycall import launcher  # noqa: E402
+from bootycall import local_packages as _lp  # noqa: E402
 
 preview = launcher.command_preview(
     window.current_project(), window.resolved_packages(), window._active_dcc.run_command
@@ -652,6 +653,88 @@ check(
     len([t for t in dev_texts if "older build" in t]) == 2,
     str([t for t in dev_texts if "nuke_utils" in t]),
 )
+
+print("\npackage sections can be switched off")
+check("all three have a checkbox", all(f.check_box is not None for f in (window.resolve_frame, window.local_frame, window.dev_frame)))
+check("all checked by default", all(f.is_checked() for f in (window.resolve_frame, window.local_frame, window.dev_frame)))
+check(
+    "the resolve one is locked on - there is nothing to launch without it",
+    not window.resolve_frame.check_box.isEnabled() and window.resolve_frame.is_checked(),
+)
+check("the other two can be changed", window.local_frame.check_box.isEnabled() and window.dev_frame.check_box.isEnabled())
+check("nothing excluded while everything is on", window.excluded_roots() == ())
+
+window.dev_frame.set_checked(False)
+QApplication.processEvents()
+check(
+    "switching dev off excludes its root",
+    window.excluded_roots() == (str(_lp.dev_root()),),
+    str(window.excluded_roots()),
+)
+check("and greys its list", not window.dev_list.isEnabled())
+check("the header says so", window.dev_frame.note.text() == "not used", window.dev_frame.note.text())
+dev_texts = [window.dev_list.item(i).text() for i in range(window.dev_list.count())]
+check(
+    "a switched-off section stops claiming to override anything",
+    not any("overrides" in t for t in dev_texts),
+    str([t for t in dev_texts if "nuke_utils" in t]),
+)
+resolve_texts = [window.package_list.item(i).text() for i in range(window.package_list.count())]
+check(
+    "and the resolve stops crediting it",
+    not any("dev build" in t for t in resolve_texts),
+    str([t for t in resolve_texts if "overridden" in t]),
+)
+check("local is untouched", window.local_frame.is_checked() and window.local_list.isEnabled())
+
+print("\nthe exclusion reaches the launched environment")
+_saved_path = os.environ.get("REZ_PACKAGES_PATH")
+os.environ["REZ_PACKAGES_PATH"] = os.pathsep.join(
+    ["/ice/rez/packages/int", str(_lp.local_root()), str(_lp.dev_root())]
+)
+launcher._PACKAGES_PATH = None
+kept, note = launcher.filtered_packages_path(window.excluded_roots())
+check("the dev root is dropped from the path", str(_lp.dev_root()) not in kept, str(kept))
+check("the local root stays", str(_lp.local_root()) in kept, str(kept))
+check("the studio path stays", "/ice/rez/packages/int" in kept, str(kept))
+check("no complaint when it worked", note == "", note)
+
+window.local_frame.set_checked(False)
+QApplication.processEvents()
+kept, note = launcher.filtered_packages_path(window.excluded_roots())
+check("both can be off at once", kept == ["/ice/rez/packages/int"], str(kept))
+
+print("\nan exclusion that cannot be applied says so")
+launcher._PACKAGES_PATH = None
+os.environ["REZ_PACKAGES_PATH"] = "/ice/rez/packages/int"
+kept, note = launcher.filtered_packages_path(window.excluded_roots())
+check("reports that nothing matched", "nothing changed" in note, note)
+launcher._PACKAGES_PATH = None
+del os.environ["REZ_PACKAGES_PATH"]
+kept, note = launcher.filtered_packages_path(window.excluded_roots())
+check(
+    "and reports an unknown path rather than pretending it filtered",
+    "could not read the rez packages path" in note,
+    note,
+)
+if _saved_path:
+    os.environ["REZ_PACKAGES_PATH"] = _saved_path
+launcher._PACKAGES_PATH = None
+
+print("\nthe switches persist")
+window.local_frame.set_checked(True)
+QApplication.processEvents()
+check("only the off one is stored", window.store.use_local() is True and window.store.use_dev() is False)
+_reopened = MainWindow(store=ConfigStore(CFG))
+_reopened.reload_projects()
+for _ in range(3):
+    QApplication.processEvents()
+check("restored on a fresh window", _reopened.local_frame.is_checked() and not _reopened.dev_frame.is_checked())
+_reopened.close()
+
+window.dev_frame.set_checked(True)
+QApplication.processEvents()
+check("back on", window.excluded_roots() == () and window.dev_list.isEnabled())
 
 print("\nthe resolve list flags the same overrides")
 window.resolve_frame.set_expanded(True)

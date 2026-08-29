@@ -282,6 +282,23 @@ class ConfigStore:
             self._preferences.pop("paths", None)
         return self.save()
 
+    def use_local(self) -> bool:
+        """Whether local packages are in play. On unless turned off."""
+        return self._preferences.get("use_local", True) is not False
+
+    def use_dev(self) -> bool:
+        """Whether dev packages are in play. On unless turned off."""
+        return self._preferences.get("use_dev", True) is not False
+
+    def set_package_use(self, use_local: bool, use_dev: bool) -> str:
+        """Store both switches. Absent means on, so only False is written."""
+        for key, value in (("use_local", use_local), ("use_dev", use_dev)):
+            if value:
+                self._preferences.pop(key, None)
+            else:
+                self._preferences[key] = False
+        return self.save()
+
     def selected_dcc(self) -> str | None:
         """The software tile that was active when the state was last saved."""
         value = self._preferences.get("selected_dcc")

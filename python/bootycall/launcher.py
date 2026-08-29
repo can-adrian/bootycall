@@ -21,6 +21,90 @@ from typing import Sequence
 from . import config
 from .discovery import Project
 
+#: Cached answer from :func:`packages_path`. Asking rez costs a subprocess, and
+#: the value does not change while BootyCall is open.
+_PACKAGES_PATH: list[str] | None = None
+
+
+def packages_path() -> list[str]:
+    """The rez packages path, as rez itself would see it.
+
+    ``REZ_PACKAGES_PATH`` when it is set, otherwise whatever ``rez-config``
+    reports. Empty when neither is available -- which is a real answer, not a
+    failure, and callers must treat it as "cannot filter" rather than "the path
+    is empty".
+    """
+    global _PACKAGES_PATH
+    if _PACKAGES_PATH is not None:
+        return list(_PACKAGES_PATH)
+
+    from_env = os.environ.get("REZ_PACKAGES_PATH", "")
+    if from_env:
+        _PACKAGES_PATH = [p for p in from_env.split(os.pathsep) if p]
+        return list(_PACKAGES_PATH)
+
+    _PACKAGES_PATH = _ask_rez_for_packages_path()
+    return list(_PACKAGES_PATH)
+
+
+def _ask_rez_for_packages_path() -> list[str]:
+    """``rez-config packages_path``, parsed leniently.
+
+    The output is a YAML list whose exact punctuation has varied across rez
+    versions, so this strips list markers and quotes rather than parsing YAML,
+    and keeps only lines that look like absolute paths.
+    """
+    try:
+        result = subprocess.run(  # noqa: S603
+            ["rez-config", "packages_path"],
+            capture_output=True,
+            text=True,
+            # Short: this runs on the UI thread the first time a section is
+            # switched off, and the answer is cached from then on.
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if result.returncode != 0:
+        return []
+
+    paths = []
+    for line in result.stdout.splitlines():
+        entry = line.strip().lstrip("-").strip().strip("'\"")
+        if entry.startswith("/") or (len(entry) > 2 and entry[1] == ":"):
+            paths.append(entry)
+    return paths
+
+
+def filtered_packages_path(exclude: Sequence[str]) -> tuple[list[str], str]:
+    """The packages path with ``exclude`` removed. Returns ``(paths, note)``.
+
+    ``note`` is non-empty when the exclusion could not be applied, so the
+    caller can say so rather than launching an environment that quietly still
+    contains what the user switched off.
+    """
+    if not exclude:
+        return [], ""
+
+    current = packages_path()
+    if not current:
+        return [], (
+            "could not read the rez packages path, so nothing was excluded - "
+            "set REZ_PACKAGES_PATH or make rez-config available"
+        )
+
+    wanted = [os.path.normpath(p) for p in exclude]
+    kept = [p for p in current if os.path.normpath(p) not in wanted]
+    if len(kept) == len(current):
+        # Nothing matched: the roots BootyCall shows are not the ones rez is
+        # actually reading, which is worth saying out loud.
+        return kept, (
+            "none of the excluded roots are on the rez packages path; "
+            "nothing changed"
+        )
+    return kept, ""
+
 
 def rez_argv(packages: Sequence[str], command: str = "") -> list[str]:
     """The rez invocation itself, without a terminal around it."""
@@ -117,21 +201,28 @@ def launch(
     project: Project,
     packages: Sequence[str],
     command: str,
+    exclude_roots: Sequence[str] = (),
     dry_run: bool = False,
 ) -> subprocess.Popen | None:
     """Resolve ``packages`` and start ``command``, detached."""
-    return _spawn(project, build_command(packages, command), dry_run)
+    return _spawn(project, build_command(packages, command), exclude_roots, dry_run)
 
 
 def open_terminal(
-    project: Project, packages: Sequence[str], dry_run: bool = False
+    project: Project,
+    packages: Sequence[str],
+    exclude_roots: Sequence[str] = (),
+    dry_run: bool = False,
 ) -> subprocess.Popen | None:
     """Open a shell resolved against ``packages``, detached."""
-    return _spawn(project, build_terminal_command(packages), dry_run)
+    return _spawn(project, build_terminal_command(packages), exclude_roots, dry_run)
 
 
 def _spawn(
-    project: Project, argv: list[str], dry_run: bool
+    project: Project,
+    argv: list[str],
+    exclude_roots: Sequence[str] = (),
+    dry_run: bool = False,
 ) -> subprocess.Popen | None:
     if dry_run:
         return None
@@ -139,6 +230,14 @@ def _spawn(
     env = os.environ.copy()
     env["ILP_SHOW"] = project.name
     env["BOOTYCALL_SHOW"] = project.name
+
+    # Switching off a package section means its packages must not reach the
+    # resolve. They are not in the request -- they arrive through the packages
+    # path -- so the only way to exclude them is to hand the child a path that
+    # does not contain their root.
+    kept, _note = filtered_packages_path(exclude_roots)
+    if kept:
+        env["REZ_PACKAGES_PATH"] = os.pathsep.join(kept)
 
     kwargs: dict = {
         # The show folder as cwd: a bootstrap's __file__-relative lookups and

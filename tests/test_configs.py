@@ -239,6 +239,20 @@ badui.write_text(json.dumps({"version": 1, "configs": [], "preferences": {"selec
 check("junk software ignored", ConfigStore(badui).selected_dcc() is None)
 check("junk variants ignored", ConfigStore(badui).variants() == {})
 
+print("\npackage-section switches")
+use = ConfigStore(tmp / "use.json")
+check("both on by default", use.use_local() is True and use.use_dev() is True)
+check("turning dev off persists", use.set_package_use(True, False) == "" and ConfigStore(tmp / "use.json").use_dev() is False)
+check("and local stays on", ConfigStore(tmp / "use.json").use_local() is True)
+check(
+    "only the off one is written - absent means on",
+    "use_local" not in json.loads((tmp / "use.json").read_text())["preferences"],
+    str(json.loads((tmp / "use.json").read_text())["preferences"]),
+)
+check("turning it back on removes the key", use.set_package_use(True, True) == "" and "use_dev" not in json.loads((tmp / "use.json").read_text())["preferences"])
+check("both off at once", use.set_package_use(False, False) == "" and ConfigStore(tmp / "use.json").use_local() is False and ConfigStore(tmp / "use.json").use_dev() is False)
+check("an old file with no switches reads as on", ConfigStore(legacy).use_local() is True and ConfigStore(legacy).use_dev() is True)
+
 print("\ninterrupted save leaves no stray temp file")
 check("no .tmp beside configs", not list(path.parent.glob("*.tmp")))
 

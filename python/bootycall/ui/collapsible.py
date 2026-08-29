@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QHBoxLayout,
     QLabel,
     QSizePolicy,
@@ -24,8 +25,17 @@ class CollapsibleFrame(QWidget):
     """A titled section that expands and collapses."""
 
     toggled = Signal(bool)
+    checkChanged = Signal(bool)
 
-    def __init__(self, title: str, expanded: bool = False, parent=None) -> None:
+    def __init__(
+        self,
+        title: str,
+        expanded: bool = False,
+        checkable: bool = False,
+        checked: bool = True,
+        locked: bool = False,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("collapsibleFrame")
 
@@ -38,6 +48,18 @@ class CollapsibleFrame(QWidget):
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(8, 5, 10, 5)
         header_layout.setSpacing(8)
+
+        self.check_box: QCheckBox | None = None
+        if checkable:
+            self.check_box = QCheckBox()
+            self.check_box.setObjectName("collapsibleCheck")
+            self.check_box.setChecked(checked)
+            if locked:
+                # Checked and not changeable: greying it is the right signal
+                # here, since it genuinely cannot be turned off.
+                self.check_box.setEnabled(False)
+            self.check_box.toggled.connect(self.checkChanged)
+            header_layout.addWidget(self.check_box)
 
         self.toggle_button = QToolButton()
         self.toggle_button.setObjectName("collapsibleToggle")
@@ -75,6 +97,14 @@ class CollapsibleFrame(QWidget):
         self._apply_size_policy(expanded)
 
     # -- state -------------------------------------------------------------
+
+    def is_checked(self) -> bool:
+        """Whether the section's packages are in play. True with no checkbox."""
+        return True if self.check_box is None else self.check_box.isChecked()
+
+    def set_checked(self, checked: bool) -> None:
+        if self.check_box is not None:
+            self.check_box.setChecked(bool(checked))
 
     def is_expanded(self) -> bool:
         return self.toggle_button.isChecked()

@@ -182,6 +182,8 @@ class MainWindow(QMainWindow):
         # layer, and reload_projects() fires as soon as the window is up.
         config.set_path_overrides(self.store.path_overrides())
         self._dcc_variant.update(self.store.variants())
+        self._use_local = self.store.use_local()
+        self._use_dev = self.store.use_dev()
         self._preferred_dcc = self.store.selected_dcc()
         self._restore_compact = self.store.compact()
         stored = self.store.visible_software()
@@ -272,7 +274,12 @@ class MainWindow(QMainWindow):
         root.addSpacing(4)
 
         # Resolved packages (collapsed by default) -------------------------
-        self.resolve_frame = CollapsibleFrame("Resolved packages", expanded=False)
+        self.resolve_frame = CollapsibleFrame(
+            "Resolved packages", expanded=False, checkable=True, locked=True
+        )
+        self.resolve_frame.check_box.setToolTip(
+            "Always used - there is nothing to launch without it"
+        )
         self.resolve_frame.toggled.connect(self._on_frame_toggled)
         self.package_list = QListWidget()
         self.package_list.setSelectionMode(QListWidget.ExtendedSelection)
@@ -289,6 +296,7 @@ class MainWindow(QMainWindow):
             self.local_path_label,
             self.local_list,
         ) = self._build_package_section("Local packages")
+        self.local_frame.set_checked(self._use_local)
         root.addWidget(self.local_frame)
         self._local_index = root.count() - 1
 
@@ -298,6 +306,7 @@ class MainWindow(QMainWindow):
             self.dev_path_label,
             self.dev_list,
         ) = self._build_package_section("Dev packages")
+        self.dev_frame.set_checked(self._use_dev)
         root.addWidget(self.dev_frame)
         self._dev_index = root.count() - 1
 
@@ -340,11 +349,23 @@ class MainWindow(QMainWindow):
         self._apply_frame_stretch()
 
     def _build_package_section(
-        self, title: str
+        self, title: str, locked: bool = False
     ) -> tuple[CollapsibleFrame, QLabel, QListWidget]:
-        """One collapsed package section: header, root path, list."""
-        frame = CollapsibleFrame(title, expanded=False)
+        """One collapsed package section: checkbox, header, root path, list."""
+        frame = CollapsibleFrame(
+            title, expanded=False, checkable=True, checked=True, locked=locked
+        )
         frame.toggled.connect(self._on_package_frame_toggled)
+        if locked:
+            frame.check_box.setToolTip(
+                "Always used - there is nothing to launch without it"
+            )
+        else:
+            frame.check_box.setToolTip(
+                "Use these packages. Unchecked, their root is taken off the "
+                "rez packages path for anything BootyCall launches."
+            )
+            frame.checkChanged.connect(self._on_package_use_changed)
 
         path_label = QLabel("")
         path_label.setObjectName("hint")
@@ -930,8 +951,18 @@ class MainWindow(QMainWindow):
             return
 
         packages = self._bootstrap.packages.get(key, ())
-        local_hits = shadowed_requests(self._local_packages, packages)
-        dev_hits = shadowed_requests(self._dev_packages, packages)
+        # A section that is switched off is not on the packages path for the
+        # launch, so it cannot override anything and must not say it does.
+        local_hits = (
+            shadowed_requests(self._local_packages, packages)
+            if self.local_frame.is_checked()
+            else {}
+        )
+        dev_hits = (
+            shadowed_requests(self._dev_packages, packages)
+            if self.dev_frame.is_checked()
+            else {}
+        )
         shadowed: dict[str, list[str]] = {}
         for request in local_hits.values():
             shadowed.setdefault(request, []).append("local")
@@ -1226,7 +1257,11 @@ class MainWindow(QMainWindow):
             (self.local_list, self.local_frame, self._local_packages),
             (self.dev_list, self.dev_frame, self._dev_packages),
         ):
-            overrides = shadowed_requests(packages, requests)
+            overrides = (
+                shadowed_requests(packages, requests)
+                if frame.is_checked()
+                else {}
+            )
 
             # Each list is newest-first per name, and rez resolves the highest
             # version that satisfies the request, so only the first entry for a
@@ -1256,7 +1291,9 @@ class MainWindow(QMainWindow):
                     item.setText(base)
                     item.setForeground(QColor("#d7dae0"))
 
-            if packages:
+            if not frame.is_checked():
+                frame.set_note("not used", "")
+            elif packages:
                 frame.set_note(
                     "%d in use" % len(overrides) if overrides else "",
                     "warn" if overrides else "",
@@ -1264,6 +1301,39 @@ class MainWindow(QMainWindow):
 
     def _on_frame_toggled(self, _expanded: bool) -> None:
         self._apply_frame_stretch()
+
+    def excluded_roots(self) -> tuple[str, ...]:
+        """Package roots to keep out of the resolve, per the checkboxes."""
+        roots: list[str] = []
+        if not self.local_frame.is_checked():
+            roots.append(str(local_root()))
+        if not self.dev_frame.is_checked():
+            roots.append(str(dev_root()))
+        return tuple(roots)
+
+    def _on_package_use_changed(self, _checked: bool) -> None:
+        self._use_local = self.local_frame.is_checked()
+        self._use_dev = self.dev_frame.is_checked()
+        error = self.store.set_package_use(self._use_local, self._use_dev)
+        if error:
+            self.statusBar().showMessage(error, 8000)
+
+        # A section that is switched off cannot be overriding anything, so the
+        # marking on both sides has to be redrawn, not just greyed.
+        for frame, listing, on in (
+            (self.local_frame, self.local_list, self._use_local),
+            (self.dev_frame, self.dev_list, self._use_dev),
+        ):
+            listing.setEnabled(on)
+        tool = self._current_tool()
+        if tool and self._bootstrap is not None:
+            self._show_packages(tool)
+        else:
+            self._refresh_override_marks()
+
+        _kept, note = launcher.filtered_packages_path(self.excluded_roots())
+        if note:
+            self.statusBar().showMessage(note, 10000)
 
     def _on_package_frame_toggled(self, expanded: bool) -> None:
         if expanded:
@@ -1374,7 +1444,7 @@ class MainWindow(QMainWindow):
             )
             return
         try:
-            launcher.open_terminal(project, packages)
+            launcher.open_terminal(project, packages, self.excluded_roots())
         except OSError as exc:
             QMessageBox.critical(
                 self,
@@ -1627,7 +1697,7 @@ class MainWindow(QMainWindow):
         packages = self.resolved_packages()
         command = self._active_dcc.run_command
         try:
-            launcher.launch(project, packages, command)
+            launcher.launch(project, packages, command, self.excluded_roots())
         except OSError as exc:
             QMessageBox.critical(
                 self,
