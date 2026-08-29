@@ -1105,7 +1105,11 @@ for _name in ("maya", "nuke", "hiero", "blender", "nukestudio"):
 window._dcc_buttons["nuke"].click()
 QApplication.processEvents()
 launch_argv = launcher.build_command(window.resolved_packages(), window._active_dcc.run_command)
-check("opens a terminal", launch_argv[0] == "x-terminal-emulator", str(launch_argv[:2]))
+check(
+    "opens whichever terminal emulator this host has",
+    launch_argv[0] == _cfg.detect_terminal()[0],
+    "%s vs detected %s" % (launch_argv[0], _cfg.detect_terminal()[0]),
+)
 check("resolves with rez", "rez-env" in launch_argv, str(launch_argv[:4]))
 check("the executable comes last", launch_argv[-1] == "nuke", str(launch_argv[-3:]))
 check("separated from the requests", launch_argv[-2] == "--", str(launch_argv[-3:]))
@@ -1165,7 +1169,11 @@ check(
 )
 
 term_argv = launcher.build_terminal_command(term_pkgs)
-check("terminal argv starts with the emulator", term_argv[0] == "x-terminal-emulator", str(term_argv[:3]))
+check(
+    "terminal argv starts with the same emulator",
+    term_argv[0] == _cfg.detect_terminal()[0],
+    str(term_argv[:3]),
+)
 check("goes to rez-env", "rez-env" in term_argv, str(term_argv[:4]))
 check(
     "packages expand to separate argv entries, not one blob",

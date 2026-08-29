@@ -214,8 +214,31 @@ check(
     all(d.run_command for d in config.DCCS),
 )
 
+print("\nterminal emulator detection")
+import shutil as _shutil  # noqa: E402
+
+_known = [name for name, _args in config.TERMINAL_EMULATORS]
+check("several candidates, best-first", len(_known) >= 5, str(_known))
+check("gnome-terminal is tried first - Rocky and RHEL default to GNOME", _known[0] == "gnome-terminal")
+check(
+    "the Debian-only name is last, not first",
+    _known[-1] == "x-terminal-emulator",
+    str(_known),
+)
+check(
+    "gnome-terminal uses -- rather than the removed -e",
+    dict(config.TERMINAL_EMULATORS)["gnome-terminal"] == ("--",),
+)
+detected = config.detect_terminal()
+check("detection returns argv, not a bare name", isinstance(detected, tuple) and detected)
+check(
+    "it picks something installed, or falls back to xterm",
+    _shutil.which(detected[0]) is not None or detected == ("xterm", "-e"),
+    str(detected),
+)
+
 print("\nlaunch template")
-check("launch opens a terminal", "x-terminal-emulator" in config.LAUNCH_COMMAND[0])
+check("launch opens a terminal", config.LAUNCH_COMMAND[0] == detected[0], str(config.LAUNCH_COMMAND[:2]))
 check("launch resolves with rez", "rez-env" in config.LAUNCH_COMMAND)
 check("launch takes packages and a command", "{packages}" in config.LAUNCH_COMMAND and "{command}" in config.LAUNCH_COMMAND)
 check("terminal takes packages but no command", "{packages}" in config.TERMINAL_COMMAND and "{command}" not in config.TERMINAL_COMMAND)

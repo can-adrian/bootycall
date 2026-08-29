@@ -36,8 +36,13 @@ def commands():
     # env.BOOTYCALL_LOCAL_PACKAGES_ROOT = "/ice/rez/packages/local/{user}"
     # env.BOOTYCALL_DEV_PACKAGES_ROOT = "{local}/dev"
     #
-    # How a DCC is started, and how a shell is opened. Both resolve with rez in
-    # a terminal; set these if your site uses a different emulator or wrapper.
+    # The terminal emulator is detected from PATH (gnome-terminal, konsole,
+    # xfce4-terminal, alacritty, kitty, xterm). Pin it if the host has several
+    # and you want a particular one:
     #
-    # env.BOOTYCALL_LAUNCH_COMMAND = "x-terminal-emulator:-e:rez-env:{packages}:--:{command}"
-    # env.BOOTYCALL_TERMINAL_COMMAND = "x-terminal-emulator:-e:rez-env:{packages}"
+    # env.BOOTYCALL_TERMINAL_EMULATOR = "gnome-terminal:--"
+    #
+    # Or replace the whole command, if your site wraps the launch:
+    #
+    # env.BOOTYCALL_LAUNCH_COMMAND = "gnome-terminal:--:rez-env:{packages}:--:{command}"
+    # env.BOOTYCALL_TERMINAL_COMMAND = "gnome-terminal:--:rez-env:{packages}"

@@ -234,8 +234,30 @@ Both go **straight to rez** rather than through the show's bootstrap. BootyCall
 already knows the exact request list, so routing it back through a wrapper would
 only add a layer that can disagree with what the UI is showing.
 
-Override either with `BOOTYCALL_LAUNCH_COMMAND` / `BOOTYCALL_TERMINAL_COMMAND`
-(colon-separated argv). `{packages}` expands to one argument per request, not a
+### Which terminal
+
+There is no portable name for a terminal emulator — `x-terminal-emulator` is a
+Debian alternatives link and doesn't exist on RHEL or Rocky — so the emulator is
+**detected** rather than hardcoded. First one found on PATH wins:
+
+| Emulator | invoked as |
+|---|---|
+| `gnome-terminal` | `gnome-terminal -- <cmd>` |
+| `konsole` | `konsole -e <cmd>` |
+| `xfce4-terminal` | `xfce4-terminal -x <cmd>` |
+| `alacritty` | `alacritty -e <cmd>` |
+| `kitty` | `kitty <cmd>` |
+| `xterm` | `xterm -e <cmd>` |
+| `x-terminal-emulator` | `x-terminal-emulator -e <cmd>` |
+
+GNOME is first because Rocky and RHEL default to it, and it's invoked with `--`
+rather than the `-e` that newer versions removed. If nothing is found it falls
+back to `xterm`, so the failure names a program that's missing rather than dying
+somewhere less legible.
+
+`BOOTYCALL_TERMINAL_EMULATOR=konsole:-e` forces the emulator while keeping the
+rest of the command; `BOOTYCALL_LAUNCH_COMMAND` / `BOOTYCALL_TERMINAL_COMMAND`
+replace the whole argv. `{packages}` expands to one argument per request, not a
 single space-joined blob, and `{command}` to the executable. Leaving `{command}`
 unfilled drops the `--` with it, so the same template collapses cleanly to a
 plain shell.
@@ -510,8 +532,9 @@ the ones below, and are handy for pointing a session at a test tree:
 |---|---|
 | `BOOTYCALL_SHOWS_ROOT` | `/ice/shows` |
 | `BOOTYCALL_BOOTSTRAP_GLOBS` | `.ilp/pipeline/*.py:.ilp/bootstrap/*.py:.ilp/*/*.py:.ilp/*.py` |
-| `BOOTYCALL_LAUNCH_COMMAND` | `x-terminal-emulator:-e:rez-env:{packages}:--:{command}` |
-| `BOOTYCALL_TERMINAL_COMMAND` | `x-terminal-emulator:-e:rez-env:{packages}` |
+| `BOOTYCALL_TERMINAL_EMULATOR` | first of gnome-terminal, konsole, xfce4-terminal, alacritty, kitty, xterm found on PATH |
+| `BOOTYCALL_LAUNCH_COMMAND` | `<detected terminal> rez-env {packages} -- {command}` |
+| `BOOTYCALL_TERMINAL_COMMAND` | `<detected terminal> rez-env {packages}` |
 | `BOOTYCALL_CONFIG_FILE` | `$XDG_CONFIG_HOME/bootycall/configs.json` |
 | `BOOTYCALL_LOCAL_PACKAGES_ROOT` | `/ice/rez/packages/local/{user}` |
 | `BOOTYCALL_DEV_PACKAGES_ROOT` | `{local}/dev` |

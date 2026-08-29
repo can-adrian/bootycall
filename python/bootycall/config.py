@@ -9,6 +9,7 @@ pointed at a test tree without editing code.
 from __future__ import annotations
 
 import os
+import shutil
 from dataclasses import dataclass, field
 from typing import Sequence
 
@@ -111,6 +112,38 @@ BOOTSTRAP_MARKER = "Bootstrap"
 # Launching
 # ---------------------------------------------------------------------------
 
+#: Terminal emulators to look for, best-first, with the flag each one uses to
+#: mean "run this command". There is no portable name for a terminal:
+#: ``x-terminal-emulator`` is a Debian alternatives link and does not exist on
+#: RHEL or Rocky, so hardcoding any single one of these is wrong somewhere.
+TERMINAL_EMULATORS: Sequence[tuple[str, tuple[str, ...]]] = (
+    ("gnome-terminal", ("--",)),
+    ("konsole", ("-e",)),
+    ("xfce4-terminal", ("-x",)),
+    ("alacritty", ("-e",)),
+    ("kitty", ()),
+    ("xterm", ("-e",)),
+    ("x-terminal-emulator", ("-e",)),
+)
+
+
+def detect_terminal() -> tuple[str, ...]:
+    """The first terminal emulator on PATH, as argv up to the command.
+
+    Falls back to ``xterm`` when nothing is found, so the failure names a
+    program that is missing rather than dying somewhere less obvious. Override
+    the choice with BOOTYCALL_TERMINAL_EMULATOR (colon-separated), or replace
+    the whole argv with BOOTYCALL_LAUNCH_COMMAND.
+    """
+    override = os.environ.get("BOOTYCALL_TERMINAL_EMULATOR")
+    if override:
+        return tuple(p for p in override.split(":") if p)
+    for name, args in TERMINAL_EMULATORS:
+        if shutil.which(name):
+            return (name,) + args
+    return ("xterm", "-e")
+
+
 #: Argv template for launching a DCC: resolve the context, open a terminal, run
 #: the application in it. ``{packages}`` expands to the resolved requests as
 #: separate arguments and ``{command}`` to the DCC's executable.
@@ -121,19 +154,18 @@ BOOTSTRAP_MARKER = "Bootstrap"
 #:
 #: Override with BOOTYCALL_LAUNCH_COMMAND (colon-separated argv).
 LAUNCH_COMMAND: Sequence[str] = tuple(
-    os.environ.get(
-        "BOOTYCALL_LAUNCH_COMMAND",
-        "x-terminal-emulator:-e:rez-env:{packages}:--:{command}",
-    ).split(":")
+    os.environ["BOOTYCALL_LAUNCH_COMMAND"].split(":")
+    if os.environ.get("BOOTYCALL_LAUNCH_COMMAND")
+    else detect_terminal() + ("rez-env", "{packages}", "--", "{command}")
 )
 
 #: The same, without an application: an interactive shell in the resolve.
 #:
 #: Override with BOOTYCALL_TERMINAL_COMMAND (colon-separated argv).
 TERMINAL_COMMAND: Sequence[str] = tuple(
-    os.environ.get(
-        "BOOTYCALL_TERMINAL_COMMAND", "x-terminal-emulator:-e:rez-env:{packages}"
-    ).split(":")
+    os.environ["BOOTYCALL_TERMINAL_COMMAND"].split(":")
+    if os.environ.get("BOOTYCALL_TERMINAL_COMMAND")
+    else detect_terminal() + ("rez-env", "{packages}")
 )
 
 
