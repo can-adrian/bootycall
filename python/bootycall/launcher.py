@@ -1,10 +1,13 @@
 """
-Tool launching.
+Launching.
 
-BootyCall does not resolve rez itself -- the show's own bootstrap does that, and
-duplicating it here would guarantee the two drift apart. We build the argv the
-bootstrap expects and hand it to a detached subprocess, so closing the UI never
-kills a running DCC.
+Both a DCC and a plain shell are the same shape: resolve the context with rez,
+open a terminal, and either run an application in it or leave a prompt. So both
+go through one argv expander over a template, and differ only in whether a
+``{command}`` is supplied.
+
+Everything is started detached, so closing BootyCall never takes a running DCC
+with it.
 """
 
 from __future__ import annotations
@@ -19,41 +22,65 @@ from . import config
 from .discovery import Project
 
 
-def build_command(tool: str) -> list[str]:
-    """Return the argv used to start ``tool``."""
-    return [part.format(tool=tool) for part in config.LAUNCH_COMMAND]
+def expand(template: Sequence[str], packages: Sequence[str], command: str = "") -> list[str]:
+    """Build an argv from ``template``.
 
-
-def build_terminal_command(packages: Sequence[str]) -> list[str]:
-    """Return the argv used to open a shell in ``packages``.
-
-    ``{packages}`` in the template expands to one argument per request rather
-    than a single space-joined string, so the requests survive as separate argv
-    entries.
+    ``{packages}`` becomes one argument per request rather than a single
+    space-joined string, so requests survive as separate argv entries.
+    ``{command}`` becomes the executable to run in the resolved context.
     """
     argv: list[str] = []
-    for part in config.TERMINAL_COMMAND:
+    for part in template:
         if "{packages}" in part:
             argv.extend(packages)
+        elif "{command}" in part:
+            if not command:
+                # No application to run: drop this part, and the separator that
+                # introduces it, so the template collapses to a plain shell.
+                if argv and argv[-1] == "--":
+                    argv.pop()
+                continue
+            argv.append(part.format(command=command))
         else:
-            argv.append(part.format(packages=""))
+            argv.append(part)
     return argv
 
 
-def command_preview(project: Project, tool: str) -> str:
-    """A copy-pasteable representation of what :func:`launch` will run."""
+def build_command(packages: Sequence[str], command: str) -> list[str]:
+    """Argv that resolves ``packages`` and runs ``command`` in a terminal."""
+    return expand(config.LAUNCH_COMMAND, packages, command)
+
+
+def build_terminal_command(packages: Sequence[str]) -> list[str]:
+    """Argv that resolves ``packages`` and leaves an interactive shell."""
+    return expand(config.TERMINAL_COMMAND, packages)
+
+
+def _preview(project: Project, argv: Sequence[str]) -> str:
     return "cd %s && %s" % (
         shlex.quote(str(project.path)),
-        " ".join(shlex.quote(part) for part in build_command(tool)),
+        " ".join(shlex.quote(part) for part in argv),
     )
+
+
+def command_preview(project: Project, packages: Sequence[str], command: str) -> str:
+    """A copy-pasteable representation of what :func:`launch` will run."""
+    return _preview(project, build_command(packages, command))
 
 
 def terminal_preview(project: Project, packages: Sequence[str]) -> str:
     """A copy-pasteable representation of what :func:`open_terminal` will run."""
-    return "cd %s && %s" % (
-        shlex.quote(str(project.path)),
-        " ".join(shlex.quote(part) for part in build_terminal_command(packages)),
-    )
+    return _preview(project, build_terminal_command(packages))
+
+
+def launch(
+    project: Project,
+    packages: Sequence[str],
+    command: str,
+    dry_run: bool = False,
+) -> subprocess.Popen | None:
+    """Resolve ``packages`` and start ``command``, detached."""
+    return _spawn(project, build_command(packages, command), dry_run)
 
 
 def open_terminal(
@@ -61,14 +88,6 @@ def open_terminal(
 ) -> subprocess.Popen | None:
     """Open a shell resolved against ``packages``, detached."""
     return _spawn(project, build_terminal_command(packages), dry_run)
-
-
-def launch(project: Project, tool: str, dry_run: bool = False) -> subprocess.Popen | None:
-    """Start ``tool`` for ``project`` in a detached process.
-
-    Returns the :class:`subprocess.Popen`, or ``None`` when ``dry_run``.
-    """
-    return _spawn(project, build_command(tool), dry_run)
 
 
 def _spawn(
@@ -82,6 +101,8 @@ def _spawn(
     env["BOOTYCALL_SHOW"] = project.name
 
     kwargs: dict = {
+        # The show folder as cwd: a bootstrap's __file__-relative lookups and
+        # anything the DCC opens by relative path both expect to start there.
         "cwd": str(project.path),
         "env": env,
         "stdout": subprocess.DEVNULL,

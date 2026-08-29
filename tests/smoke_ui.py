@@ -237,10 +237,13 @@ shot(window, "05-maya")
 print("\ncommand preview")
 from bootycall import launcher  # noqa: E402
 
-preview = launcher.command_preview(window.current_project(), "maya")
+preview = launcher.command_preview(
+    window.current_project(), window.resolved_packages(), window._active_dcc.run_command
+)
 check("preview mentions show path", "/tmp/ice/shows/batman_returns" in preview, preview)
-check("preview mentions tool", preview.endswith("maya"), preview)
-print("       %s" % preview)
+check("preview ends with the DCC executable", preview.endswith("maya"), preview)
+check("and resolves through rez", "rez-env" in preview, preview)
+print("       %s" % preview[:120])
 
 print("\nshow with only some DCCs")
 pin("finishing_only")
@@ -1082,6 +1085,56 @@ check("reset restores the defaults", list(window._dcc_buttons) == ["houdinicore"
 check("reset clears the stored preference", window.store.visible_software() is None)
 check("menu checkboxes follow", [n for n, a in window._software_actions.items() if a.isChecked()] == ["houdinicore", "houdinifx", "maya", "nuke"])
 
+print("\nlaunching resolves, opens a terminal, and runs the DCC")
+from bootycall import config as _cfg  # noqa: E402
+
+check(
+    "houdini core runs houdinicore",
+    _cfg.dcc_by_name("houdinicore").run_command == "houdinicore",
+)
+check(
+    "houdini fx runs houdini - SideFX names them the other way round",
+    _cfg.dcc_by_name("houdinifx").run_command == "houdini",
+)
+for _name in ("maya", "nuke", "hiero", "blender", "nukestudio"):
+    check(
+        "%s falls back to its own name" % _name,
+        _cfg.dcc_by_name(_name).run_command == _name,
+    )
+
+window._dcc_buttons["nuke"].click()
+QApplication.processEvents()
+launch_argv = launcher.build_command(window.resolved_packages(), window._active_dcc.run_command)
+check("opens a terminal", launch_argv[0] == "x-terminal-emulator", str(launch_argv[:2]))
+check("resolves with rez", "rez-env" in launch_argv, str(launch_argv[:4]))
+check("the executable comes last", launch_argv[-1] == "nuke", str(launch_argv[-3:]))
+check("separated from the requests", launch_argv[-2] == "--", str(launch_argv[-3:]))
+check(
+    "requests are separate argv entries",
+    "nuke-16.0" in launch_argv and "base-6" in launch_argv,
+    str(launch_argv[:6]),
+)
+check(
+    "the show package rides along, as it does for the terminal",
+    "show_batman_returns" in launch_argv,
+    str(launch_argv[-4:]),
+)
+check(
+    "one argv entry per request plus the wrapper",
+    len(launch_argv) == 5 + len(window.resolved_packages()),
+    "%d argv for %d packages" % (len(launch_argv), len(window.resolved_packages())),
+)
+
+window._dcc_buttons["houdinifx"].click()
+QApplication.processEvents()
+check(
+    "switching DCC changes the executable, not just the packages",
+    launcher.build_command(window.resolved_packages(), window._active_dcc.run_command)[-1]
+    == "houdini",
+)
+window._dcc_buttons["nuke"].click()
+QApplication.processEvents()
+
 print("\nterminal tile")
 pin("batman_returns")
 window._dcc_buttons["nuke"].click()
@@ -1098,7 +1151,7 @@ check(
     "%d of %d" % (window.dcc_row.indexOf(window.favorites_button), window.dcc_row.count()),
 )
 
-term_pkgs = window.terminal_packages()
+term_pkgs = window.resolved_packages()
 check("terminal uses the selected variant's requests", "nuke-16.0" in term_pkgs, str(term_pkgs[:3]))
 check(
     "show package appended (its directory exists in the mock tree)",
@@ -1119,17 +1172,22 @@ check(
     term_argv.count("nuke-16.0") == 1 and len(term_argv) == 3 + len(term_pkgs),
     "%d argv for %d packages" % (len(term_argv), len(term_pkgs)),
 )
+check(
+    "no application, and no dangling -- either",
+    term_argv[-1] != "--" and "--" not in term_argv,
+    str(term_argv[-3:]),
+)
 print("       %s" % launcher.terminal_preview(window.current_project(), term_pkgs)[:110] + " ...")
 
 pin("finishing_only")
 check(
     "no show package where the directory is absent",
-    "show_finishing_only" not in window.terminal_packages(),
-    str(window.terminal_packages()),
+    "show_finishing_only" not in window.resolved_packages(),
+    str(window.resolved_packages()),
 )
 unpin_all()
 check("terminal tile disabled with no show", not window.terminal_button.isEnabled())
-check("no packages, no terminal", window.terminal_packages() == ())
+check("no packages, no terminal", window.resolved_packages() == ())
 
 print("\nfavourites window")
 from bootycall.configs import SavedConfig as _SC  # noqa: E402

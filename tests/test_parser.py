@@ -146,6 +146,26 @@ check("good entry kept", "maya" in odd.packages)
 check("bad entry skipped", "weird" not in odd.packages)
 check("bad entry reported", any("weird" in u for u in odd.unresolved), str(odd.unresolved))
 
+print("\nargv expansion")
+from bootycall import launcher  # noqa: E402
+
+argv = launcher.expand(
+    ("term", "-e", "rez-env", "{packages}", "--", "{command}"),
+    ("a-1", "b-2"),
+    "maya",
+)
+check("packages become separate entries", argv == ["term", "-e", "rez-env", "a-1", "b-2", "--", "maya"], str(argv))
+
+argv = launcher.expand(("term", "-e", "rez-env", "{packages}", "--", "{command}"), ("a-1",), "")
+check(
+    "no command drops the separator too, rather than leaving a bare --",
+    argv == ["term", "-e", "rez-env", "a-1"],
+    str(argv),
+)
+
+argv = launcher.expand(("term", "-e", "rez-env", "{packages}"), (), "")
+check("no packages, no filler", argv == ["term", "-e", "rez-env"], str(argv))
+
 print("\npath settings layer")
 check("three settable paths", config.PATH_KEYS == ("shows_root", "local_root", "dev_root"))
 check("defaults cover them all", set(config.path_defaults()) == set(config.PATH_KEYS))
@@ -173,6 +193,32 @@ check(
     not any(d.default_visible for d in config.DCCS if d.name in ("nukestudio", "hiero", "blender")),
 )
 check("every key has a label", all(k in d.variant_labels for d in config.DCCS for k in d.keys))
+
+print("\nDCC executables")
+check(
+    "houdini core runs houdinicore, fx runs houdini",
+    config.dcc_by_name("houdinicore").run_command == "houdinicore"
+    and config.dcc_by_name("houdinifx").run_command == "houdini",
+)
+check(
+    "everything else falls back to its lowercase name",
+    all(
+        d.run_command == d.name.lower()
+        for d in config.DCCS
+        if d.name != "houdinifx"
+    ),
+    str({d.name: d.run_command for d in config.DCCS}),
+)
+check(
+    "no executable is empty",
+    all(d.run_command for d in config.DCCS),
+)
+
+print("\nlaunch template")
+check("launch opens a terminal", "x-terminal-emulator" in config.LAUNCH_COMMAND[0])
+check("launch resolves with rez", "rez-env" in config.LAUNCH_COMMAND)
+check("launch takes packages and a command", "{packages}" in config.LAUNCH_COMMAND and "{command}" in config.LAUNCH_COMMAND)
+check("terminal takes packages but no command", "{packages}" in config.TERMINAL_COMMAND and "{command}" not in config.TERMINAL_COMMAND)
 
 print()
 if failures:

@@ -1344,20 +1344,22 @@ class MainWindow(QMainWindow):
     def _on_copy_command(self) -> None:
         project = self.current_project()
         tool = self._current_tool()
-        if project is None or tool is None:
+        if project is None or tool is None or self._active_dcc is None:
             return
-        command = launcher.command_preview(project, tool)
-        QApplication.clipboard().setText(command)
-        self.statusBar().showMessage("Copied: %s" % command, 5000)
+        preview = launcher.command_preview(
+            project, self.resolved_packages(), self._active_dcc.run_command
+        )
+        QApplication.clipboard().setText(preview)
+        self.statusBar().showMessage("Copied: %s" % preview, 5000)
 
-    # -- terminal ----------------------------------------------------------
+    # -- resolving, launching, terminal -------------------------------------
 
-    def terminal_packages(self) -> tuple[str, ...]:
-        """The request list a shell should be resolved against.
+    def resolved_packages(self) -> tuple[str, ...]:
+        """The request list to resolve, for a launch or for a shell.
 
         The show's own ``show_<name>`` package is appended when the directory
         exists, because the bootstrap adds it to every resolve -- leaving it out
-        would hand you a shell subtly unlike the one the DCC gets.
+        would hand you an environment subtly unlike the one the show expects.
         """
         project = self.current_project()
         tool = self._current_tool()
@@ -1371,7 +1373,7 @@ class MainWindow(QMainWindow):
 
     def _on_open_terminal(self) -> None:
         project = self.current_project()
-        packages = self.terminal_packages()
+        packages = self.resolved_packages()
         if project is None or not packages:
             self.statusBar().showMessage(
                 "Pick a show and a tool first - the shell needs a package set", 5000
@@ -1608,7 +1610,7 @@ class MainWindow(QMainWindow):
             )
             return
 
-        error = dev_install.update_dev_installs(project, self.terminal_packages())
+        error = dev_install.update_dev_installs(project, self.resolved_packages())
         if error:
             QMessageBox.warning(self, "Dev installs not updated", error)
             return
@@ -1617,21 +1619,29 @@ class MainWindow(QMainWindow):
     def _on_launch(self) -> None:
         project = self.current_project()
         tool = self._current_tool()
-        if project is None or tool is None:
+        if project is None or tool is None or self._active_dcc is None:
             return
+
+        packages = self.resolved_packages()
+        command = self._active_dcc.run_command
         try:
-            launcher.launch(project, tool)
+            launcher.launch(project, packages, command)
         except OSError as exc:
             QMessageBox.critical(
                 self,
                 "Launch failed",
                 "Could not start %s for %s:\n\n%s\n\nCommand:\n%s"
-                % (tool, project.name, exc, launcher.command_preview(project, tool)),
+                % (
+                    command,
+                    project.name,
+                    exc,
+                    launcher.command_preview(project, packages, command),
+                ),
             )
             return
         self.save_ui_state()
         self.statusBar().showMessage(
-            "Launched %s for %s" % (tool, project.name), 8000
+            "Launched %s (%s) for %s" % (command, tool, project.name), 8000
         )
 
     def save_ui_state(self) -> str:

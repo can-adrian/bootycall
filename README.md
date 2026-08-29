@@ -220,31 +220,58 @@ want, not a quiet edit to a tile you aren't looking at.
 The active software **sticks across shows**: switch from `batman_returns` to
 `dune_pt3` and you stay on Nuke, unless the new show doesn't offer it.
 
-## Terminal
+## Launching, and the Terminal
 
-The **Terminal** tile in the software row opens a shell resolved against
-whatever package set is currently selected. It is not part of the exclusive DCC
-group — it is an action, not one of the show's software choices, so it is drawn
-with a dashed border and stays available whatever is selected. Ctrl+T does the
-same.
-
-It goes **straight to rez** rather than through the bootstrap:
+Launch and Terminal are the same shape — resolve the context with rez, open a
+terminal, and either run the application in it or leave a prompt:
 
 ```
-cd <show> && x-terminal-emulator -e rez-env <the resolved request list>
+cd <show> && x-terminal-emulator -e rez-env <resolved requests> -- <executable>
+cd <show> && x-terminal-emulator -e rez-env <resolved requests>
 ```
 
-BootyCall already knows the exact request list, and there is no documented
-bootstrap entry point for an interactive shell, so inventing one would have been
-a guess on top of a guess. Override the whole argv with
-`BOOTYCALL_TERMINAL_COMMAND`; `{packages}` expands to one argument per request,
-not a single space-joined blob.
+Both go **straight to rez** rather than through the show's bootstrap. BootyCall
+already knows the exact request list, so routing it back through a wrapper would
+only add a layer that can disagree with what the UI is showing.
 
-The show's own `show_<name>` package is appended when
+Override either with `BOOTYCALL_LAUNCH_COMMAND` / `BOOTYCALL_TERMINAL_COMMAND`
+(colon-separated argv). `{packages}` expands to one argument per request, not a
+single space-joined blob, and `{command}` to the executable. Leaving `{command}`
+unfilled drops the `--` with it, so the same template collapses cleanly to a
+plain shell.
+
+### Which executable
+
+Per DCC, defaulting to the DCC's own name in lowercase:
+
+| DCC | runs |
+|---|---|
+| Houdini Core | `houdinicore` |
+| Houdini FX | `houdini` |
+| Maya | `maya` |
+| Nuke | `nuke` |
+| Nuke Studio | `nukestudio` |
+| Hiero | `hiero` |
+| Blender | `blender` |
+
+Only Houdini FX needs an override — SideFX names the binaries the other way
+round from how people say it, so the FX build is `houdini` and Core is
+`houdinicore`. Set `Dcc.command` in `config.py` for any others that don't match
+their name.
+
+The executable is per **DCC**, not per variant: variants differ in what packages
+are stacked into the environment, not in what gets run. Maya on the Ziva build
+still runs `maya`.
+
+The show's own `show_<name>` package is appended to both when
 `<show>/.ilp/packages/show_<name>` exists, because `_get_show_packages()` adds it
-to every resolve — leaving it out would hand you a shell subtly unlike the one
-the DCC gets. BootyCall can't run rez's validator from here, so it checks the
-directory exists rather than guessing.
+to every resolve — leaving it out would give you an environment subtly unlike
+the one the show expects. BootyCall can't run rez's validator from here, so it
+checks the directory exists rather than guessing.
+
+**Terminal** is not part of the exclusive DCC group — it's an action, not one of
+the show's software choices — so it's drawn with a dashed border and stays
+available whatever is selected. Ctrl+T does the same.
 
 ## Favourites
 
@@ -483,18 +510,17 @@ the ones below, and are handy for pointing a session at a test tree:
 |---|---|
 | `BOOTYCALL_SHOWS_ROOT` | `/ice/shows` |
 | `BOOTYCALL_BOOTSTRAP_GLOBS` | `.ilp/pipeline/*.py:.ilp/bootstrap/*.py:.ilp/*/*.py:.ilp/*.py` |
-| `BOOTYCALL_LAUNCH_COMMAND` | `ilp_bootstrap:{tool}` |
+| `BOOTYCALL_LAUNCH_COMMAND` | `x-terminal-emulator:-e:rez-env:{packages}:--:{command}` |
 | `BOOTYCALL_TERMINAL_COMMAND` | `x-terminal-emulator:-e:rez-env:{packages}` |
 | `BOOTYCALL_CONFIG_FILE` | `$XDG_CONFIG_HOME/bootycall/configs.json` |
 | `BOOTYCALL_LOCAL_PACKAGES_ROOT` | `/ice/rez/packages/local/{user}` |
 | `BOOTYCALL_DEV_PACKAGES_ROOT` | `{local}/dev` |
 | `BOOTYCALL_REZ_USER` | the logged-in user |
 
-**`BOOTYCALL_LAUNCH_COMMAND` is a guess** — it's the one thing here I couldn't
-infer from the bootstrap file. Set it to whatever your desktop wrappers actually
-invoke. It's run with the show folder as cwd, which is what the bootstrap's
-`__file__`-relative `_get_show_packages()` lookup expects. The **Copy command**
-button prints exactly what will run, so you can check it before wiring it up.
+Both commands run with the show folder as cwd, which is what a bootstrap's
+`__file__`-relative lookups and anything the DCC opens by relative path both
+expect. The **Copy command** button prints exactly what will run, so you can
+paste it into a shell and check it.
 
 `BOOTSTRAP_GLOBS` is also a guess, derived from the three `os.path.dirname()`
 calls in `_get_show_packages()` — that puts the bootstrap three levels below the

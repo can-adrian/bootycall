@@ -111,21 +111,23 @@ BOOTSTRAP_MARKER = "Bootstrap"
 # Launching
 # ---------------------------------------------------------------------------
 
-#: Argv template used to start a tool. ``{tool}`` is substituted with the
-#: bootstrap ``packages`` key. The command is run with the show folder as cwd,
-#: which is what the bootstrap's own ``__file__``-relative lookups expect.
+#: Argv template for launching a DCC: resolve the context, open a terminal, run
+#: the application in it. ``{packages}`` expands to the resolved requests as
+#: separate arguments and ``{command}`` to the DCC's executable.
 #:
-#: NOTE: confirm this matches how the farm/desktop wrappers invoke bootstrap at
-#: your site; override with BOOTYCALL_LAUNCH_COMMAND (colon-separated argv).
+#: Both templates go straight to rez rather than through the show's bootstrap.
+#: BootyCall already knows the exact request list, so routing it back through a
+#: wrapper would only add a layer that can disagree with what the UI is showing.
+#:
+#: Override with BOOTYCALL_LAUNCH_COMMAND (colon-separated argv).
 LAUNCH_COMMAND: Sequence[str] = tuple(
-    os.environ.get("BOOTYCALL_LAUNCH_COMMAND", "ilp_bootstrap:{tool}").split(":")
+    os.environ.get(
+        "BOOTYCALL_LAUNCH_COMMAND",
+        "x-terminal-emulator:-e:rez-env:{packages}:--:{command}",
+    ).split(":")
 )
 
-#: Argv template for "open a terminal in this environment". ``{packages}``
-#: expands to the resolved package requests as separate arguments, so this goes
-#: straight to rez rather than through the bootstrap -- BootyCall already knows
-#: the exact request list, and there is no documented bootstrap entry point for
-#: an interactive shell.
+#: The same, without an application: an interactive shell in the resolve.
 #:
 #: Override with BOOTYCALL_TERMINAL_COMMAND (colon-separated argv).
 TERMINAL_COMMAND: Sequence[str] = tuple(
@@ -162,6 +164,10 @@ class Dcc:
     #: Short qualifiers, used only where two variants share a version and the
     #: number alone would not say which is which.
     variant_tags: dict[str, str] = field(default_factory=dict)
+    #: The executable to run inside the resolved context. Defaults to the DCC's
+    #: own name in lowercase; set it only where the binary is named differently
+    #: from the thing people call it.
+    command: str = ""
     #: Shown without the user turning it on. The long tail (Nuke Studio, Hiero,
     #: Blender) is real but rarely wanted, and a row of nine tiles buries the
     #: four people actually reach for.
@@ -173,6 +179,11 @@ class Dcc:
 
     def label_for(self, key: str) -> str:
         return self.variant_labels.get(key, key)
+
+    @property
+    def run_command(self) -> str:
+        """The executable this DCC launches."""
+        return self.command or self.name.lower()
 
 
 #: The DCCs BootyCall exposes. Deliberately hard-coded: the shows' bootstrap
@@ -197,6 +208,9 @@ DCCS: tuple[Dcc, ...] = (
     ),
     Dcc(
         name="houdinifx",
+        # SideFX names it the other way round from how people say it: the FX
+        # binary is `houdini`, and `houdinicore` is Core.
+        command="houdini",
         version_package="houdini",
         variant_tags={"prmanfx": "RenderMan"},
         label="Houdini FX",

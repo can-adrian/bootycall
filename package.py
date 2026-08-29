@@ -36,9 +36,8 @@ def commands():
     # env.BOOTYCALL_LOCAL_PACKAGES_ROOT = "/ice/rez/packages/local/{user}"
     # env.BOOTYCALL_DEV_PACKAGES_ROOT = "{local}/dev"
     #
-    # How a DCC is started, and how a shell is opened. Both are guesses in the
-    # shipped defaults -- see the README -- and are the two settings most
-    # likely to need a site value here.
+    # How a DCC is started, and how a shell is opened. Both resolve with rez in
+    # a terminal; set these if your site uses a different emulator or wrapper.
     #
-    # env.BOOTYCALL_LAUNCH_COMMAND = "ilp_bootstrap:{tool}"
+    # env.BOOTYCALL_LAUNCH_COMMAND = "x-terminal-emulator:-e:rez-env:{packages}:--:{command}"
     # env.BOOTYCALL_TERMINAL_COMMAND = "x-terminal-emulator:-e:rez-env:{packages}"
