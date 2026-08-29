@@ -1,0 +1,261 @@
+"""
+Checks for the dev working location: discovery, installing, staleness, and the
+filtered view that per-package checkboxes launch through.
+
+No rez here, so the install itself is exercised with a stand-in command. What
+matters is that BootyCall runs the right thing in the right directory and
+reports what came back, not that rez-build works.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
+
+from bootycall import config, dev_install  # noqa: E402
+from bootycall.local_packages import LocalPackage, list_local_packages  # noqa: E402
+
+failures: list[str] = []
+
+
+def check(label: str, condition: bool, detail: str = "") -> None:
+    if condition:
+        print("  ok   %s" % label)
+    else:
+        failures.append(label)
+        print("  FAIL %s %s" % (label, detail))
+
+
+import tempfile  # noqa: E402
+
+ROOT = Path(tempfile.mkdtemp(prefix="bootycall-devwork-"))
+WORKING = ROOT / "dev"
+INSTALLED = ROOT / "installed"
+WORKING.mkdir()
+INSTALLED.mkdir()
+
+
+def make_package(parent: Path, name: str, version: str = "", body: str = "") -> Path:
+    directory = parent / name / version if version else parent / name
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "package.py").write_text(
+        body or "name = '%s'\nversion = '%s'\n" % (name, version or "1.0.0")
+    )
+    return directory
+
+
+print("what is in the working location")
+make_package(WORKING, "nuke_utils")
+make_package(WORKING, "anim_tools")
+(WORKING / "notes").mkdir()  # a folder, but not a package
+(WORKING / "scratch.txt").write_text("not a directory\n")
+(WORKING / ".hidden").mkdir()
+
+found = dev_install.list_working_packages(WORKING)
+check("folders listed, files ignored", [p.name for p in found] == ["anim_tools", "notes", "nuke_utils"], str([p.name for p in found]))
+check("hidden folders skipped", all(not p.name.startswith(".") for p in found))
+check(
+    "packages recognised by their definition",
+    sorted(p.name for p in found if p.is_package) == ["anim_tools", "nuke_utils"],
+    str([p.name for p in found if p.is_package]),
+)
+check(
+    "a folder that is not a package is kept, with the reason",
+    [p for p in found if p.name == "notes"][0].problem == "no package definition in it",
+)
+check("a missing working root is empty, not an error",
+      dev_install.list_working_packages(ROOT / "nope") == [])
+
+print("\ninstalling")
+log = ROOT / "install.log"
+saved_command = config.DEV_INSTALL_COMMAND
+config.DEV_INSTALL_COMMAND = (
+    "bash",
+    "-c",
+    'echo "built $(basename $PWD) into $1" >> %s; '
+    "mkdir -p $1/$(basename $PWD)/1.0.0; "
+    "cp package.py $1/$(basename $PWD)/1.0.0/" % log,
+    "bootycall-install",
+    "{dest}",
+)
+
+ok, output = dev_install.install(WORKING / "nuke_utils", INSTALLED)
+check("install reports success", ok, output)
+check(
+    "it ran in the package's own directory, and was told where to put it",
+    log.read_text().strip() == "built nuke_utils into %s" % INSTALLED,
+    log.read_text().strip(),
+)
+check(
+    "and the package landed",
+    (INSTALLED / "nuke_utils" / "1.0.0" / "package.py").is_file(),
+)
+
+bad, message = dev_install.install(WORKING / "notes", INSTALLED)
+check("a folder with no definition is refused before running anything", not bad)
+check("and says why", "no package definition" in message, message)
+
+config.DEV_INSTALL_COMMAND = ("bash", "-c", "echo 'build blew up' >&2; exit 2")
+failed, message = dev_install.install(WORKING / "anim_tools", INSTALLED)
+check("a failing build is reported as a failure", not failed)
+check("with the build's own words", "build blew up" in message, message)
+
+config.DEV_INSTALL_COMMAND = ("definitely-not-a-real-build-tool",)
+missing, message = dev_install.install(WORKING / "anim_tools", INSTALLED)
+check("a missing build tool is a message, not a crash", not missing)
+check("naming what could not be run", "could not run" in message, message)
+config.DEV_INSTALL_COMMAND = saved_command
+
+print("\nsymlinking")
+ok, message = dev_install.symlink(WORKING / "anim_tools", INSTALLED)
+check("linked", ok, message)
+check("and it is a link, not a copy", (INSTALLED / "anim_tools").is_symlink())
+check(
+    "pointing at the working copy",
+    (INSTALLED / "anim_tools").resolve() == (WORKING / "anim_tools").resolve(),
+)
+ok, message = dev_install.symlink(WORKING / "anim_tools", INSTALLED)
+check("re-linking replaces the old link rather than failing", ok, message)
+
+refused, message = dev_install.symlink(WORKING / "nuke_utils", INSTALLED)
+check("but it will not quietly replace a real installed package", not refused)
+check("saying so plainly", "real directory" in message, message)
+
+print("\nwhich installs are behind their working copies")
+installed_packages = list_local_packages(INSTALLED, exclude=())
+check(
+    "both are installed",
+    sorted({p.name for p in installed_packages}) == ["anim_tools", "nuke_utils"],
+    str(sorted({p.name for p in installed_packages})),
+)
+check("nothing stale yet", dev_install.stale_installs(installed_packages, WORKING) == [])
+
+time.sleep(0.01)
+(WORKING / "nuke_utils" / "tool.py").write_text("# an edit\n")
+stale = dev_install.stale_installs(installed_packages, WORKING)
+check("editing the working copy makes it stale", [s.name for s in stale] == ["nuke_utils"], str([s.name for s in stale]))
+check("and it says how far behind", "newer" in stale[0].describe(), stale[0].describe())
+
+time.sleep(0.01)
+(WORKING / "anim_tools" / "rig.py").write_text("# also edited\n")
+stale = dev_install.stale_installs(installed_packages, WORKING)
+check(
+    "a symlinked install is never stale - it is the working copy",
+    [s.name for s in stale] == ["nuke_utils"],
+    str([s.name for s in stale]),
+)
+
+print("\nnoise that must not count as an edit")
+time.sleep(0.01)
+build_dir = WORKING / "nuke_utils" / "build"
+build_dir.mkdir()
+(build_dir / "artifact.o").write_text("x")
+(WORKING / "nuke_utils" / "__pycache__").mkdir()
+(WORKING / "nuke_utils" / "__pycache__" / "tool.pyc").write_text("x")
+(WORKING / "nuke_utils" / ".git").mkdir()
+(WORKING / "nuke_utils" / ".git" / "index").write_text("x")
+
+before = dev_install.newest_mtime(WORKING / "nuke_utils")
+time.sleep(0.01)
+(build_dir / "artifact.o").write_text("changed again")
+check(
+    "a rebuilt artifact does not read as a source edit",
+    dev_install.newest_mtime(WORKING / "nuke_utils") == before,
+    "%s vs %s" % (dev_install.newest_mtime(WORKING / "nuke_utils"), before),
+)
+
+only_source = ROOT / "quiet"
+make_package(only_source, "thing")
+check(
+    "an untouched package still reports a time",
+    dev_install.newest_mtime(only_source / "thing") > 0,
+)
+
+print("\nupdating the stale ones")
+config.DEV_INSTALL_COMMAND = (
+    "bash",
+    "-c",
+    "mkdir -p $1/$(basename $PWD)/1.0.0; touch $1/$(basename $PWD)/1.0.0/package.py",
+    "bootycall-install",
+    "{dest}",
+)
+stale = dev_install.stale_installs(list_local_packages(INSTALLED, exclude=()), WORKING)
+updated, problems = dev_install.update_installs(stale, INSTALLED)
+check("the stale one was rebuilt", updated == ["nuke_utils"], str(updated))
+check("nothing went wrong", problems == [], str(problems))
+check(
+    "and it is no longer behind",
+    dev_install.stale_installs(list_local_packages(INSTALLED, exclude=()), WORKING) == [],
+)
+
+config.DEV_INSTALL_COMMAND = ("bash", "-c", "echo nope >&2; exit 1")
+time.sleep(0.01)
+(WORKING / "nuke_utils" / "tool.py").write_text("# edited once more\n")
+stale = dev_install.stale_installs(list_local_packages(INSTALLED, exclude=()), WORKING)
+updated, problems = dev_install.update_installs(stale, INSTALLED)
+check("a failed update is reported", updated == [] and len(problems) == 1, str(problems))
+check("naming the package that failed", problems[0].startswith("nuke_utils:"), problems[0])
+config.DEV_INSTALL_COMMAND = saved_command
+
+print("\nthe filtered view behind the per-package checkboxes")
+view_dir = ROOT / "view"
+none_off, error = dev_install.selection_view(INSTALLED, [], view_dir)
+check("nothing switched off means the real root is used", none_off is None and error == "", error)
+
+view, error = dev_install.selection_view(INSTALLED, ["nuke_utils"], view_dir)
+check("switching one off builds a view", view is not None, error)
+check(
+    "holding only the ones still wanted",
+    sorted(p.name for p in view.iterdir()) == ["anim_tools"],
+    str(sorted(p.name for p in view.iterdir())),
+)
+check("as links, so nothing is copied", (view / "anim_tools").is_symlink())
+check(
+    "and rez can still read the package through it",
+    [p.name for p in list_local_packages(view, exclude=())] == ["anim_tools"],
+    str([p.name for p in list_local_packages(view, exclude=())]),
+)
+check(
+    "the real root is untouched",
+    sorted({p.name for p in list_local_packages(INSTALLED, exclude=())})
+    == ["anim_tools", "nuke_utils"],
+)
+
+view2, error = dev_install.selection_view(INSTALLED, ["anim_tools"], view_dir)
+check(
+    "rebuilding the view forgets the previous selection",
+    sorted(p.name for p in view2.iterdir()) == ["nuke_utils"],
+    str(sorted(p.name for p in view2.iterdir())),
+)
+
+everything_off, error = dev_install.selection_view(
+    INSTALLED, ["anim_tools", "nuke_utils"], view_dir
+)
+check(
+    "switching everything off is the same as switching the section off",
+    everything_off is None and error == "",
+    error,
+)
+
+print("\nremoving an installed one")
+link_target = (INSTALLED / "anim_tools").resolve()
+linked = [p for p in list_local_packages(INSTALLED, exclude=()) if p.name == "anim_tools"][0]
+check("the install under test is the link", linked.path.is_symlink(), str(linked.path))
+error = dev_install.remove_installed(linked, INSTALLED)
+check("removing a linked install works", error == "", error)
+check("and leaves the working copy alone", link_target.is_dir(), str(link_target))
+
+outsider = LocalPackage(name="elsewhere", version="", path=ROOT / "quiet" / "thing")
+error = dev_install.remove_installed(outsider, INSTALLED)
+check("something outside the root is refused", "refusing" in error, error)
+check("and is still there", (ROOT / "quiet" / "thing").is_dir())
+
+print()
+if failures:
+    print("%d FAILED: %s" % (len(failures), ", ".join(failures)))
+    sys.exit(1)
+print("all dev-install checks passed")

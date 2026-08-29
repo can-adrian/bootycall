@@ -54,6 +54,7 @@ from ..local_packages import (
     current_user,
     delete_package,
     dev_root,
+    dev_working_root,
     list_local_packages,
     local_root,
     shadowed_requests,
@@ -65,6 +66,7 @@ from .config_menu import ConfigMenuAction
 from .dcc_tile import DccTile
 from .favorites_window import FavoritesWindow
 from .flow_layout import FlowLayout
+from .install_dialog import InstallPackageDialog
 from .settings_dialog import SettingsDialog
 from .style import STYLESHEET
 
@@ -201,6 +203,9 @@ class MainWindow(QMainWindow):
         self._dcc_variant.update(self.store.variants())
         self._use_local = self.store.use_local()
         self._use_dev = self.store.use_dev()
+        #: Installed dev packages switched off by name. Only the off ones
+        #: are held, so a newly installed package is in play by default.
+        self._disabled_dev: set[str] = set(self.store.disabled_dev_packages())
         self._preferred_dcc = self.store.selected_dcc()
         self._restore_compact = self.store.compact()
         stored = self.store.visible_software()
@@ -314,12 +319,13 @@ class MainWindow(QMainWindow):
         root.addWidget(self.local_frame)
         self._local_index = root.count() - 1
 
-        # Dev packages (collapsed by default) ------------------------------
+        # Installed dev packages (collapsed by default) --------------------
         (
             self.dev_frame,
             self.dev_path_label,
             self.dev_list,
-        ) = self._build_package_section("Dev packages")
+        ) = self._build_package_section("Installed Dev Packages")
+        self.dev_list.itemChanged.connect(self._on_dev_item_changed)
         self.dev_frame.set_checked(self._use_dev)
         root.addWidget(self.dev_frame)
         self._dev_index = root.count() - 1
@@ -352,7 +358,10 @@ class MainWindow(QMainWindow):
         self.launch_button.setObjectName("launchButton")
         self.launch_button.setEnabled(False)
         self.launch_button.setDefault(True)
-        self.launch_button.clicked.connect(self._on_launch)
+        # Not connected directly: clicked emits its checked state, which would
+        # arrive as _on_launch's first argument and quietly skip the dev
+        # check the day someone makes this button checkable.
+        self.launch_button.clicked.connect(lambda: self._on_launch())
         self.launch_button.setContextMenuPolicy(Qt.CustomContextMenu)
         self.launch_button.customContextMenuRequested.connect(self._on_launch_menu)
         footer.addWidget(self.launch_button)
@@ -1098,11 +1107,10 @@ class MainWindow(QMainWindow):
             if self.local_frame.is_checked()
             else {}
         )
-        dev_hits = (
-            shadowed_requests(self._dev_packages, packages)
-            if self.dev_frame.is_checked()
-            else {}
-        )
+        # enabled_dev_packages() rather than all of them: a dev package you
+        # unticked is not on the path for the launch, so it overrides nothing
+        # and must not say it does.
+        dev_hits = shadowed_requests(self.enabled_dev_packages(), packages)
         shadowed: dict[str, list[str]] = {}
         for request in local_hits.values():
             shadowed.setdefault(request, []).append("local")
@@ -1195,14 +1203,16 @@ class MainWindow(QMainWindow):
             exclude=None,
             empty_hint="No local packages yet - nothing here overrides your resolve.",
         )
+        blocked = self.dev_list.blockSignals(True)
         self._dev_packages = self._fill_package_section(
             frame=self.dev_frame,
             path_label=self.dev_path_label,
             listing=self.dev_list,
             root=dev_root(),
             exclude=(),
-            empty_hint="No dev packages yet - nothing here overrides your resolve.",
+            empty_hint="No dev packages installed - right-click here to install one.",
         )
+        self.dev_list.blockSignals(blocked)
 
         # The resolve list marks overrides, so it has to be redrawn too.
         tool = self._current_tool()
@@ -1253,14 +1263,81 @@ class MainWindow(QMainWindow):
             listing.addItem(item)
         else:
             frame.set_badge("%d packages" % len(packages))
+            # Only the dev list is tickable. Dev builds are the ones you flip
+            # on and off while working; a local package is a whole-root
+            # decision and a row of checkboxes there would only be clutter.
+            tickable = listing is self.dev_list
             for package in packages:
                 item = QListWidgetItem(package.request)
                 item.setData(_PACKAGE_NAME_ROLE, package.name)
                 item.setData(_PACKAGE_PATH_ROLE, str(package.path))
-                item.setToolTip("%s\n%s" % (package.path, package.definition))
+                tip = "%s\n%s" % (package.path, package.definition)
+                if tickable:
+                    # Setting a check state is what puts a box on the row --
+                    # ItemIsUserCheckable is already in Qt's default flags, so
+                    # setting it would say nothing. A row with no check state
+                    # is how the local list stays plain.
+                    item.setCheckState(
+                        Qt.Unchecked
+                        if package.name in self._disabled_dev
+                        else Qt.Checked
+                    )
+                    tip += (
+                        "\n\nUnticked, this package is kept out of the resolve "
+                        "and the studio one is used instead."
+                    )
+                item.setToolTip(tip)
                 listing.addItem(item)
 
         return packages
+
+    def _on_dev_item_changed(self, item: QListWidgetItem) -> None:
+        """A dev package was ticked or unticked."""
+        name = item.data(_PACKAGE_NAME_ROLE)
+        if not name:
+            return
+
+        was_disabled = name in self._disabled_dev
+        now_disabled = item.checkState() != Qt.Checked
+        if was_disabled == now_disabled:
+            return
+
+        # By name, not by version: the checkbox says "use my build of this",
+        # and having 1.0.0 on while 0.9.0 is off would resolve to whichever
+        # rez picked anyway.
+        if now_disabled:
+            self._disabled_dev.add(name)
+        else:
+            self._disabled_dev.discard(name)
+
+        self._sync_dev_checks()
+        error = self.store.set_disabled_dev_packages(sorted(self._disabled_dev))
+        if error:
+            self.statusBar().showMessage(error, 8000)
+
+        self._refresh_override_marks()
+        tool = self._current_tool()
+        if tool:
+            self._show_packages(tool)
+
+    def _sync_dev_checks(self) -> None:
+        """Make every row of a name agree, without re-entering the handler."""
+        blocked = self.dev_list.blockSignals(True)
+        for row in range(self.dev_list.count()):
+            item = self.dev_list.item(row)
+            name = item.data(_PACKAGE_NAME_ROLE)
+            if not name:
+                continue
+            item.setCheckState(
+                Qt.Unchecked if name in self._disabled_dev else Qt.Checked
+            )
+        self.dev_list.blockSignals(blocked)
+
+    def enabled_dev_packages(self) -> list[LocalPackage]:
+        """The installed dev packages actually in play."""
+        if not self.dev_frame.is_checked():
+            return []
+        return [p for p in self._dev_packages if p.name not in self._disabled_dev]
 
     # -- package context menu ----------------------------------------------
 
@@ -1282,8 +1359,18 @@ class MainWindow(QMainWindow):
 
     def _on_package_menu(self, listing: QListWidget, point) -> None:
         clicked = listing.itemAt(point)
+        is_dev = listing is self.dev_list
+
         if clicked is None or not clicked.data(_PACKAGE_PATH_ROLE):
-            return  # a placeholder or error row, not a package
+            # Empty space, a placeholder, or an error row. On the dev list that
+            # is exactly where someone with nothing installed yet will
+            # right-click, so Install Package has to be reachable from there.
+            if is_dev:
+                menu = QMenu(self)
+                install_action = menu.addAction("Install Package...")
+                if menu.exec(listing.mapToGlobal(point)) is install_action:
+                    self.show_install_dialog()
+            return
 
         selected = [i for i in listing.selectedItems() if i.data(_PACKAGE_PATH_ROLE)]
         # Right-clicking outside the selection targets what was clicked, which
@@ -1295,6 +1382,9 @@ class MainWindow(QMainWindow):
 
         count = len(packages)
         menu = QMenu(self)
+        install_action = menu.addAction("Install Package...") if is_dev else None
+        if install_action is not None:
+            menu.addSeparator()
         browse_action = menu.addAction(
             "Browse folder" if count == 1 else "Browse %d folders" % count
         )
@@ -1309,7 +1399,9 @@ class MainWindow(QMainWindow):
         )
 
         chosen = menu.exec(listing.mapToGlobal(point))
-        if chosen is browse_action:
+        if install_action is not None and chosen is install_action:
+            self.show_install_dialog()
+        elif chosen is browse_action:
             self.browse_packages(packages)
         elif chosen is copy_action:
             QApplication.clipboard().setText(
@@ -1320,6 +1412,17 @@ class MainWindow(QMainWindow):
             )
         elif chosen is delete_action:
             self._confirm_delete_packages(listing, packages)
+
+    def show_install_dialog(self) -> None:
+        """Browse the working location and install one of its packages."""
+        dialog = InstallPackageDialog(dev_working_root(), dev_root(), self)
+        dialog.exec()
+        if not dialog.installed:
+            return
+
+        self.refresh_package_lists()
+        names = ", ".join(dict.fromkeys(dialog.installed))
+        self.statusBar().showMessage("Installed %s" % names, 8000)
 
     def browse_packages(self, packages: list[LocalPackage]) -> list[str]:
         """Open each package folder in the desktop's file manager.
@@ -1419,7 +1522,7 @@ class MainWindow(QMainWindow):
 
         for listing, frame, packages in (
             (self.local_list, self.local_frame, self._local_packages),
-            (self.dev_list, self.dev_frame, self._dev_packages),
+            (self.dev_list, self.dev_frame, self.enabled_dev_packages()),
         ):
             overrides = (
                 shadowed_requests(packages, requests)
@@ -1467,13 +1570,39 @@ class MainWindow(QMainWindow):
         self._apply_frame_stretch()
 
     def excluded_roots(self) -> tuple[str, ...]:
-        """Package roots to keep out of the resolve, per the checkboxes."""
+        """Package roots to keep out of the resolve, per the checkboxes.
+
+        The dev root also comes off when only *some* of its packages are
+        wanted: what goes on the path instead is a filtered view of it, built
+        by :func:`dev_install.selection_view`.
+        """
         roots: list[str] = []
         if not self.local_frame.is_checked():
             roots.append(str(local_root()))
         if not self.dev_frame.is_checked():
             roots.append(str(dev_root()))
+        elif self._dev_view_root() is not None:
+            roots.append(str(dev_root()))
         return tuple(roots)
+
+    def _dev_view_root(self):
+        """The filtered dev root for this launch, or ``None`` for the real one.
+
+        Only built when something is actually switched off, so the common case
+        costs nothing and puts no extra directory on the path.
+        """
+        if not self.dev_frame.is_checked() or not self._disabled_dev:
+            return None
+        present = {p.name for p in self._dev_packages}
+        off = sorted(self._disabled_dev & present)
+        if not off:
+            return None
+
+        view, error = dev_install.selection_view(dev_root(), off)
+        if error:
+            self.statusBar().showMessage(error, 8000)
+            return None
+        return view
 
     def _on_package_use_changed(self, _checked: bool) -> None:
         self._use_local = self.local_frame.is_checked()
@@ -1629,14 +1758,19 @@ class MainWindow(QMainWindow):
         candidate roots go on instead of neither: rez found it somewhere, and a
         root that turns out to hold nothing costs a resolve nothing.
         """
+        extra: list[str] = []
+        view = self._dev_view_root()
+        if view is not None:
+            extra.append(str(view))
+
         show_pkg = self.show_package()
         if show_pkg is not None:
-            return (str(show_pkg.root),)
+            return tuple(extra) + (str(show_pkg.root),)
 
         project = self.current_project()
         if project is None or not self.show_package_requests():
-            return ()
-        return tuple(
+            return tuple(extra)
+        return tuple(extra) + tuple(
             str(root) for root in show_package_roots(project) if root.is_dir()
         )
 
@@ -1873,32 +2007,114 @@ class MainWindow(QMainWindow):
         elif chosen is update_action:
             self._on_update_and_launch()
 
+    def stale_dev_installs(self) -> list:
+        """Installed dev packages older than the working copies they came from.
+
+        Only the ones actually in play: warning about a package you have
+        switched off, or a whole section you have switched off, is a warning
+        about something that is not going to be in the environment anyway.
+        """
+        enabled = self.enabled_dev_packages()
+        if not enabled:
+            return []
+        return dev_install.stale_installs(enabled, dev_working_root())
+
+    def _update_dev_installs(self, stale) -> bool:
+        """Re-install ``stale``. Returns whether everything worked."""
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        self.statusBar().showMessage(
+            "Rebuilding %d dev package%s..."
+            % (len(stale), "" if len(stale) == 1 else "s")
+        )
+        QApplication.processEvents()
+        try:
+            updated, failures = dev_install.update_installs(stale, dev_root())
+        finally:
+            QApplication.restoreOverrideCursor()
+
+        self.refresh_package_lists()
+        if failures:
+            QMessageBox.warning(
+                self,
+                "Some dev packages were not updated",
+                "%s\n\n%s"
+                % (
+                    "Updated: " + ", ".join(updated) if updated else "Nothing updated.",
+                    "\n".join(failures),
+                ),
+            )
+            return False
+
+        self.statusBar().showMessage(
+            "Updated %s" % ", ".join(updated) if updated else "Nothing to update", 8000
+        )
+        return True
+
+    def check_dev_installs(self) -> str:
+        """Ask about stale dev installs before launching.
+
+        Returns "launch", "cancel", or "" when there was nothing to ask about.
+
+        The prompt exists because the failure it prevents is silent: you edit a
+        package, launch, and spend twenty minutes wondering why your change is
+        not there. It only appears when something is genuinely behind, so it
+        stays a signal rather than another dialog to dismiss on autopilot.
+        """
+        stale = self.stale_dev_installs()
+        if not stale:
+            return ""
+
+        listing = "\n".join("  %s" % item.describe() for item in stale)
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("Dev packages are out of date")
+        box.setText(
+            "%d installed dev package%s older than your working copies:"
+            % (len(stale), " is" if len(stale) == 1 else "s are")
+        )
+        box.setInformativeText(
+            "%s\n\nLaunching now uses what is installed, not what you have "
+            "been editing." % listing
+        )
+        update = box.addButton("Update and Launch", QMessageBox.AcceptRole)
+        launch = box.addButton("Launch Anyway", QMessageBox.DestructiveRole)
+        box.addButton(QMessageBox.Cancel)
+        box.setDefaultButton(update)
+        box.exec()
+
+        clicked = box.clickedButton()
+        if clicked is launch:
+            return "launch"
+        if clicked is not update:
+            return "cancel"
+
+        return "launch" if self._update_dev_installs(stale) else "cancel"
+
     def _on_update_and_launch(self) -> None:
+        """The Launch menu's explicit version of the same thing."""
         project = self.current_project()
         tool = self._current_tool()
         if project is None or tool is None:
             return
 
-        if not dev_install.IMPLEMENTED:
-            # Deliberately does not fall through to a plain launch: that would
-            # look like the update ran.
-            QMessageBox.information(
-                self,
-                dev_install.MENU_LABEL,
-                dev_install.NOT_IMPLEMENTED_NOTE,
+        stale = self.stale_dev_installs()
+        if not stale:
+            self.statusBar().showMessage(
+                "Every dev package in play is up to date", 5000
             )
+        elif not self._update_dev_installs(stale):
+            # Deliberately does not fall through to a launch: that would look
+            # like the update ran.
             return
+        self._on_launch(checked_dev=True)
 
-        error = dev_install.update_dev_installs(project, self.resolved_packages())
-        if error:
-            QMessageBox.warning(self, "Dev installs not updated", error)
-            return
-        self._on_launch()
-
-    def _on_launch(self) -> None:
+    def _on_launch(self, checked_dev: bool = False) -> None:
         project = self.current_project()
         tool = self._current_tool()
         if project is None or tool is None or self._active_dcc is None:
+            return
+
+        if not checked_dev and self.check_dev_installs() == "cancel":
             return
 
         packages = self.resolved_packages()

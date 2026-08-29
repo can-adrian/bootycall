@@ -10,6 +10,31 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.3.0
+
+Dev packages get a working location, and BootyCall stops assuming what is
+installed is what you have been writing. Minor rather than patch: the packages
+path a launch is built from can now differ from the dev root on disk.
+
+- **New path setting: Dev working location**, defaulting to `~/dev`. Where you
+  edit, as against Dev packages -- renamed **Installed Dev Packages** -- which is
+  what rez resolves.
+- **Install Package** on the Installed Dev Packages right-click menu, including
+  on empty space where someone with nothing installed will click. It lists the
+  working location, marks which folders are packages and why the others are not,
+  and either builds one in (`rez-build`) or symlinks it for live editing.
+- **Launch checks for stale installs.** If an installed dev package is older than
+  its working copy you get Update and Launch, Launch Anyway, or Cancel. Build
+  products, `__pycache__` and version-control directories do not count as edits;
+  symlinked installs can never be stale. This is what **Update Dev Installs and
+  Launch** has been a placeholder for since 0.1.0.
+- **A tick per installed dev package.** Untick one and the studio version is used
+  instead -- done by putting a filtered view of the dev root on the packages
+  path, because a rez package filter excludes a name and would take the studio
+  copy with it. Only the off ones are saved.
+- An unticked dev package no longer claims to override anything in the resolve
+  list. It is not on the path, so it does not.
+
 ## 0.2.1
 
 - **Houdini Core is now just Houdini, and Houdini FX is HouFX.** The row is read

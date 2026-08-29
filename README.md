@@ -154,7 +154,13 @@ closing never shrinks it, since that would undo a size you chose.
 | Section | Root |
 |---|---|
 | Local packages | `/ice/rez/packages/local/<user>` |
-| Dev packages | `/ice/rez/packages/local/<user>/dev` |
+| Installed Dev Packages | `/ice/rez/packages/local/<user>/dev` |
+
+And one root that is not a section, because nothing resolves out of it:
+
+| | Root |
+|---|---|
+| Dev working location | `~/dev` |
 
 Both read the standard rez layout (`<name>/<version>/package.py`, version level
 omitted for unversioned packages). `package.yaml` counts too, and a version
@@ -166,6 +172,92 @@ that, `dev` reads as a package whose "versions" are your dev package names — a
 quietly wrong list rather than a visible error, which is why there's a test
 asserting the blacklist is load-bearing. Blacklisting the word is safe on the
 assumption no rez package will ever be called `dev`.
+
+### Dev packages: working copies and installed ones
+
+Two locations, and the whole feature is the gap between them.
+
+* The **dev working location** (`~/dev`) is where you edit. Checkouts, branches,
+  half-finished thoughts.
+* **Installed Dev Packages** (`<local>/dev`) is what rez actually resolves.
+
+Editing the installed copy directly is how a half-written build ends up inside a
+running DCC, so BootyCall never blurs the two. Both paths are in Settings.
+
+#### Install Package
+
+Right-click the Installed Dev Packages list — including on empty space, which is
+where you will be right-clicking when you have nothing installed yet. The dialog
+lists the working location and says, per row, whether each folder is a package
+rez could install; the ones that are not stay visible and greyed with the reason,
+because a browser that hides the folder you were looking for is worse than one
+that tells you why it cannot use it.
+
+Two ways out, and they are genuinely different:
+
+* **Install** runs `rez-build --clean --install --prefix <dev root>` in the
+  working copy. `rez-build` rather than a copy, because a package that builds is
+  the only kind rez guarantees is complete — build commands, variants and
+  requires are the package's own business, and reimplementing any of it here
+  would be a second, worse rez. A failed build shows you rez's own output rather
+  than a paraphrase of it.
+* **Symlink** points the dev root at the working copy. Every edit is live in the
+  next resolve with no install step, which is what you want while you are
+  changing something every few minutes — and it means a broken save is live too,
+  nothing gets built, and the staleness check below can never fire, because the
+  installed copy *is* the working copy. It asks before doing it.
+
+`BOOTYCALL_DEV_INSTALL_COMMAND` replaces the build command if your site installs
+packages its own way; `{dest}` is the dev root, and it runs with the working copy
+as its working directory.
+
+#### Out-of-date installs
+
+On Launch, BootyCall compares each installed dev package against the working copy
+of the same name and tells you when the install is older:
+
+```
+2 installed dev packages are older than your working copies:
+  nuke_utils-4.10.0 (working copy is 40 minutes newer)
+  shot_tools-1.0.0 (working copy is 2 hours newer)
+
+Launching now uses what is installed, not what you have been editing.
+
+[Update and Launch]  [Launch Anyway]  [Cancel]
+```
+
+The failure it prevents is a silent one: you edit a package, launch, and spend
+twenty minutes wondering why your change isn't there. It only appears when
+something is genuinely behind, so it stays a signal rather than another dialog to
+dismiss on autopilot — and **Update Dev Installs and Launch** on Launch's
+right-click menu does the same thing on demand.
+
+Some things deliberately don't count as "edited": `build/`, `__pycache__`,
+`.git`, `.svn` and `.pyc` files. Their times move for reasons that have nothing
+to do with your source, and counting them would report everything as permanently
+out of date — a warning that is always on being one nobody reads. Symlinked
+installs are never stale, by construction. Packages with no working copy are
+never stale either: they came from somewhere else, and calling them out of date
+would be an invention.
+
+#### Using only some of them
+
+Every row in Installed Dev Packages has its own tick. Untick one and it stays out
+of the resolve, with the studio version used instead. Only the off ones are
+saved, so a package you install tomorrow is in play without you going to find it.
+
+Local packages have no per-row ticks — that root is a whole-root decision, and a
+column of boxes there would be clutter.
+
+Excluding one package is not something a rez package filter can do here. A filter
+excludes a *name*, and the studio almost certainly ships a package with the same
+name as your dev build — that is the entire reason you made one — so excluding by
+name would take the studio copy out too and fail the resolve. Instead BootyCall
+builds a directory of symlinks holding only the packages still switched on and
+puts that on `REZ_PACKAGES_PATH` in place of the real dev root. rez looks in it,
+does not find what you switched off, and carries on to the next root exactly as
+it would if you had never built it. Nothing is switched off, nothing is built —
+the common case costs nothing.
 
 ### Overrides
 
@@ -676,6 +768,9 @@ the ones below, and are handy for pointing a session at a test tree:
 | `BOOTYCALL_CONFIG_FILE` | `$XDG_CONFIG_HOME/bootycall/configs.json` |
 | `BOOTYCALL_LOCAL_PACKAGES_ROOT` | `/ice/rez/packages/local/{user}` |
 | `BOOTYCALL_DEV_PACKAGES_ROOT` | `{local}/dev` |
+| `BOOTYCALL_DEV_WORKING_ROOT` | `{home}/dev` |
+| `BOOTYCALL_DEV_INSTALL_COMMAND` | `rez-build --clean --install --prefix {dest}` |
+| `BOOTYCALL_DEV_INSTALL_TIMEOUT` | `600` seconds |
 | `BOOTYCALL_REZ_USER` | the logged-in user |
 | `BOOTYCALL_PROBE_MODE` | `auto` (also `off`) |
 | `BOOTYCALL_PROBE_COMMAND` | `python {script} {bootstrap}` |

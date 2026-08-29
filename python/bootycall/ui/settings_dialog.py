@@ -12,6 +12,7 @@ network path is otherwise invisible until the section it feeds comes up empty.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
@@ -46,10 +47,19 @@ FIELDS: tuple[tuple[str, str, str, str], ...] = (
     ),
     (
         "dev_root",
-        "Dev packages",
-        "Your dev package root. {local} is the resolved local root, so leaving "
-        "it as {local}/dev keeps the two together.",
+        "Installed dev packages",
+        "Where your installed dev packages land, and what rez resolves. "
+        "{local} is the resolved local root, so leaving it as {local}/dev "
+        "keeps the two together.",
         "{user}, {local}",
+    ),
+    (
+        "dev_working_root",
+        "Dev working location",
+        "Where you edit dev packages, before installing them. Install Package "
+        "browses this, and BootyCall compares it against your installed dev "
+        "packages to tell you when one is out of date.",
+        "{user}, {home}, {local}",
     ),
 )
 
@@ -105,12 +115,25 @@ class _PathRow(QWidget):
         self.edit.setText(value or "")
 
     def effective(self) -> str:
-        """What this row resolves to, defaults and placeholders included."""
+        """What this row resolves to, defaults and placeholders included.
+
+        Every placeholder is offered to every row rather than a per-key list:
+        a field that silently ignores {home} because of which row it is in is
+        a rule nobody can see from the dialog.
+        """
         raw = self.value() or config.path_defaults()[self.key]
-        if self.key == "dev_root":
-            local = config.local_root_template().format(user=current_user())
-            return raw.format(local=local, user=current_user())
-        return raw.format(user=current_user())
+        user = current_user()
+        try:
+            expanded = raw.format(
+                user=user,
+                home=os.path.expanduser("~"),
+                local=config.local_root_template().format(user=user),
+            )
+        except (KeyError, IndexError):
+            # An unknown placeholder is the user's typo to see, not ours to
+            # swallow -- showing the raw text makes it obvious what happened.
+            return raw
+        return os.path.expanduser(expanded)
 
     # -- feedback ----------------------------------------------------------
 

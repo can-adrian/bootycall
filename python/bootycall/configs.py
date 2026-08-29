@@ -299,6 +299,26 @@ class ConfigStore:
                 self._preferences[key] = False
         return self.save()
 
+    def disabled_dev_packages(self) -> tuple[str, ...]:
+        """Dev package names the user has switched off, by name.
+
+        Only the *off* ones are stored: a new dev package you install should be
+        in play without you having to go and tick it, and storing the on ones
+        would mean the opposite.
+        """
+        stored = self._preferences.get("disabled_dev_packages")
+        if not isinstance(stored, list):
+            return ()
+        return tuple(str(n) for n in stored if str(n).strip())
+
+    def set_disabled_dev_packages(self, names: Sequence[str]) -> str:
+        cleaned = sorted({str(n).strip() for n in names if str(n).strip()})
+        if cleaned:
+            self._preferences["disabled_dev_packages"] = cleaned
+        else:
+            self._preferences.pop("disabled_dev_packages", None)
+        return self.save()
+
     def selected_dcc(self) -> str | None:
         """The software tile that was active when the state was last saved."""
         value = self._preferences.get("selected_dcc")

@@ -37,6 +37,17 @@ LOCAL_ROOT_TEMPLATE = os.environ.get(
 #: local root, so moving the local root moves this with it by default.
 DEV_ROOT_TEMPLATE = os.environ.get("BOOTYCALL_DEV_PACKAGES_ROOT", "{local}/dev")
 
+#: Where you *work* on dev packages, as opposed to where installed ones land.
+#: A working copy is a checkout you edit; an installed one is what rez resolves.
+#: Keeping them apart is the whole point -- editing a package rez is currently
+#: resolving is how you get a half-written build inside a running DCC.
+#:
+#: ``{user}`` is the username and ``{home}`` the home directory, so the default
+#: is simply the user's own ~/dev.
+DEV_WORKING_ROOT_TEMPLATE = os.environ.get(
+    "BOOTYCALL_DEV_WORKING_ROOT", "{home}/dev"
+)
+
 #: Where a user's own packages live. The bootstrap's ``_get_show_packages()``
 #: searches this alongside the show's own package directory, and looks here
 #: first -- so a user can shadow a show package with their own copy.
@@ -56,8 +67,13 @@ RESERVED_PACKAGE_NAMES: tuple[str, ...] = ("dev",)
 #: Runtime overrides from the Settings dialog. Empty until one is set.
 _PATH_OVERRIDES: dict[str, str] = {}
 
-#: The three settable paths, in the order the Settings dialog shows them.
-PATH_KEYS: tuple[str, ...] = ("shows_root", "local_root", "dev_root")
+#: The settable paths, in the order the Settings dialog shows them.
+PATH_KEYS: tuple[str, ...] = (
+    "shows_root",
+    "local_root",
+    "dev_root",
+    "dev_working_root",
+)
 
 
 def path_defaults() -> dict[str, str]:
@@ -66,6 +82,7 @@ def path_defaults() -> dict[str, str]:
         "shows_root": SHOWS_ROOT,
         "local_root": LOCAL_ROOT_TEMPLATE,
         "dev_root": DEV_ROOT_TEMPLATE,
+        "dev_working_root": DEV_WORKING_ROOT_TEMPLATE,
     }
 
 
@@ -101,6 +118,51 @@ def local_root_template() -> str:
 
 def dev_root_template() -> str:
     return path_setting("dev_root")
+
+
+def dev_working_root_template() -> str:
+    return path_setting("dev_working_root")
+
+
+# ---------------------------------------------------------------------------
+# Installing dev packages
+# ---------------------------------------------------------------------------
+
+#: How a working copy becomes an installed dev package. Run with the working
+#: copy as cwd; ``{dest}`` is the installed dev root.
+#:
+#: ``rez-build`` rather than a copy, because a package that builds is the only
+#: kind rez guarantees is complete: build_command, variants and requires are the
+#: package's own business, and reimplementing any of it here would be a second,
+#: worse rez. Colon-separated in the environment variable.
+DEV_INSTALL_COMMAND: Sequence[str] = tuple(
+    os.environ["BOOTYCALL_DEV_INSTALL_COMMAND"].split(":")
+    if os.environ.get("BOOTYCALL_DEV_INSTALL_COMMAND")
+    else ("rez-build", "--clean", "--install", "--prefix", "{dest}")
+)
+
+#: How long an install is given before it is called a failure. Builds compile
+#: things; this is generous on purpose.
+DEV_INSTALL_TIMEOUT = float(os.environ.get("BOOTYCALL_DEV_INSTALL_TIMEOUT", "600"))
+
+#: Files whose modification times say nothing about the package's source, and
+#: which would otherwise make everything look permanently out of date.
+DEV_MTIME_IGNORE: tuple[str, ...] = (
+    ".git",
+    ".svn",
+    "__pycache__",
+    "build",
+    ".rez",
+    ".DS_Store",
+)
+
+
+def dev_install_command() -> tuple[str, ...]:
+    return tuple(DEV_INSTALL_COMMAND)
+
+
+def dev_install_timeout() -> float:
+    return DEV_INSTALL_TIMEOUT
 
 #: Folder names under SHOWS_ROOT that are never real shows.
 SHOW_EXCLUDES = ("lost+found", "_template", "_archive", "tmp")

@@ -167,7 +167,17 @@ argv = launcher.expand(("term", "-e", "rez-env", "{packages}"), (), "")
 check("no packages, no filler", argv == ["term", "-e", "rez-env"], str(argv))
 
 print("\npath settings layer")
-check("three settable paths", config.PATH_KEYS == ("shows_root", "local_root", "dev_root"))
+check(
+    "four settable paths",
+    config.PATH_KEYS
+    == ("shows_root", "local_root", "dev_root", "dev_working_root"),
+    str(config.PATH_KEYS),
+)
+check(
+    "the working location defaults into the user's home, not a package root",
+    config.path_defaults()["dev_working_root"] == "{home}/dev",
+    config.path_defaults()["dev_working_root"],
+)
 check("defaults cover them all", set(config.path_defaults()) == set(config.PATH_KEYS))
 check("no overrides to begin with", config.path_overrides() == {})
 config.set_path_overrides({"shows_root": "/mnt/elsewhere"})

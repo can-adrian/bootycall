@@ -58,6 +58,21 @@ def dev_root(user: str | None = None) -> Path:
     )
 
 
+def dev_working_root(user: str | None = None) -> Path:
+    """Where the user edits dev packages, before they are installed.
+
+    Separate from :func:`dev_root` on purpose: one is a checkout you are
+    changing, the other is what rez resolves. Editing the installed copy
+    directly is how a half-written build ends up inside a running DCC.
+    """
+    name = user or current_user()
+    return Path(
+        config.dev_working_root_template().format(
+            user=name, home=os.path.expanduser("~"), local=local_root(name)
+        )
+    ).expanduser()
+
+
 @dataclass(frozen=True)
 class LocalPackage:
     """One versioned package directory under the dev root."""
