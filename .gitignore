@@ -5,3 +5,8 @@ build/
 dist/
 .venv/
 shots/
+
+# Patch files land in the working tree on their way through `git am`, and are
+# not part of the history they describe.
+*.patch
+*.diff
