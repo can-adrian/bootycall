@@ -331,21 +331,51 @@ config.SHOW_RESOLVE_INFO = _saved_info
 
 print("\nsaying which resolved packages are the user's own")
 _roots = (("dev", "/ice/local/adts/dev"), ("local", "/ice/local/adts"))
-_summary = launcher.mine_summary(_roots)
+_summary = launcher.launch_banner(_roots)
 check("it reads the resolved environment, not our predictions", "REZ_" in _summary and "_ROOT" in _summary, _summary[:80])
 check("both roots are matched", "/ice/local/adts/dev/*" in _summary and "/ice/local/adts/*" in _summary, _summary[:200])
 check(
     "and it says so when none of them made it in",
     "none of your local or dev packages" in _summary,
-    _summary[-120:],
+    _summary[-160:],
 )
-check("no roots, no summary", launcher.mine_summary(()) == "")
+check("nothing to say, nothing printed", launcher.launch_banner() == "")
+
+print("\nand what this window switched off, which rez cannot know")
+_noted = launcher.launch_banner(
+    _roots, (("warn", "Local packages are switched OFF for this launch"),)
+)
+check(
+    "the note is in the banner",
+    "Local packages are switched OFF" in _noted,
+    _noted[:200],
+)
+check(
+    "coloured by level",
+    "_bcY" in _noted and "_bcG" in _noted and "_bcR" in _noted,
+    _noted[:200],
+)
+check(
+    "and colour is dropped when the output is not a terminal",
+    "[ -t 1 ]" in _noted,
+    _noted[:120],
+)
+check(
+    "notes alone are enough to earn a banner",
+    launcher.launch_banner((), (("warn", "x"),)) != "",
+)
+_nasty = launcher.launch_banner((), (("warn", 'a "quote" and $VAR and `cmd`'),))
+check(
+    "note text cannot break out of its shell string",
+    '\\"quote\\"' in _nasty and "\\$VAR" in _nasty and "\\`cmd\\`" in _nasty,
+    _nasty,
+)
 
 _argv = launcher.rez_argv(("a-1",), "maya", roots=_roots)
 check(
     "the launch carries it",
-    "BootyCall: resolved from your own package roots" in _argv[-1],
-    _argv[-1][:80],
+    "your packages in this environment" in _argv[-1],
+    _argv[-1][:120],
 )
 check(
     "and still execs the application afterwards",

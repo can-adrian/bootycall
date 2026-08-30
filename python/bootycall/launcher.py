@@ -225,55 +225,97 @@ def resolved_for(probe: ResolveProbe, name: str) -> tuple[str, str]:
     return probe.version_of(_rez_env_key(name))
 
 
-def mine_summary(roots: Sequence[tuple[str, str]]) -> str:
-    """Shell that lists which resolved packages came out of the user's roots.
+def _colour_setup() -> str:
+    """Shell that fills colour variables, or blanks them when piped.
 
-    rez already marks packages from its *configured* local packages path green
-    and ``(local)`` in the context table. A dev root BootyCall adds to the path
-    gets no such mark -- rez has no reason to think it is special -- so a dev
-    build sits in that table looking exactly like the other forty entries and
-    is trivially missed. This says which ones are yours, in BootyCall's own
-    words, right under rez's table.
-
-    Read from ``REZ_<NAME>_ROOT`` in the resolved environment rather than from
-    anything BootyCall predicted: this line has to be true, and the environment
-    is the only place that knows.
-
-    The line printed when *nothing* matched is the one that matters most. "None
-    of your packages are in this environment" is the answer to the question
-    that otherwise costs an afternoon.
+    Escapes are put in variables rather than written inline so the whole banner
+    degrades to plain text in one place. A launcher's output ends up in log
+    files as often as in terminals, and escape codes in a log are worse than no
+    colour in a terminal.
     """
-    if not roots:
+    return (
+        "if [ -t 1 ]; then "
+        "_bcB=$(printf '\\033[1m'); _bcG=$(printf '\\033[32m'); "
+        "_bcY=$(printf '\\033[33m'); _bcR=$(printf '\\033[31m'); "
+        "_bcD=$(printf '\\033[2m'); _bc0=$(printf '\\033[0m'); "
+        "else _bcB=; _bcG=; _bcY=; _bcR=; _bcD=; _bc0=; fi"
+    )
+
+
+#: Colour per note level, as a shell variable name.
+_LEVELS = {"ok": "_bcG", "warn": "_bcY", "error": "_bcR", "": "_bcD"}
+
+
+def launch_banner(
+    roots: Sequence[tuple[str, str]] = (),
+    notes: Sequence[tuple[str, str]] = (),
+) -> str:
+    """Shell that reports what BootyCall did to this environment.
+
+    rez's own table says what resolved. It cannot say which of those forty
+    lines are yours, and it has no idea you switched a whole package root off
+    before launching -- that happened in a window it never saw. Both are things
+    you want to know in the first two seconds of a session that behaves oddly.
+
+    ``notes`` are decided in Python, where the switches live. The package list
+    is read from ``REZ_<NAME>_ROOT`` in the resolved environment, because that
+    is the only place that knows what actually happened.
+    """
+    if not roots and not notes:
         return ""
 
-    # One line, because it is embedded in a shell string that is itself
-    # embedded in an echo. A here-string keeps the loop in the current shell so
-    # the accumulator survives it; a pipe would put it in a subshell and the
-    # results would vanish with it.
-    cases = "".join(
-        '%s/*) _bc_hits="$_bc_hits\n  $_bc_name  (%s)" ;; ' % (shlex.quote(root), label)
-        for label, root in roots
-    )
-    return (
-        '_bc_hits=""; '
-        "while read -r _bc_key _bc_path; do "
-        '[ -z "$_bc_key" ] && continue; '
-        '_bc_ver="REZ_${_bc_key}_VERSION"; '
-        "_bc_name=\"$(printf '%s' \"$_bc_key\" | tr 'A-Z' 'a-z')-${!_bc_ver}\"; "
-        'case "$_bc_path" in ' + cases + "esac; "
-        "done <<< \"$(env | sed -n "
-        "'s/^REZ_\\([A-Z0-9_]*\\)_ROOT=\\(.*\\)$/\\1 \\2/p' | sort)\"; "
-        'if [ -n "$_bc_hits" ]; then '
-        'printf \"BootyCall: resolved from your own package roots:%b\\n\" '
-        '"$_bc_hits"; '
-        "else "
-        'printf \"BootyCall: none of your local or dev packages are in this '
-        'environment.\\n\"; '
-        "fi; echo"
+    parts = [_colour_setup()]
+    parts.append(
+        "printf '%s\\n' \"${_bcB}BootyCall${_bc0}${_bcD} - what this window "
+        "changed about the environment${_bc0}\""
     )
 
+    for level, text in notes:
+        colour = _LEVELS.get(level, "_bcD")
+        parts.append(
+            "printf '%%s\\n' \"${%s}  %s${_bc0}\"" % (colour, _escape(text))
+        )
 
-def context_preamble(command: str, roots: Sequence[tuple[str, str]] = ()) -> str:
+    if roots:
+        cases = "".join(
+            '%s/*) _bc_hits="$_bc_hits\n    $_bc_name  (%s)" ;; '
+            % (shlex.quote(root), label)
+            for label, root in roots
+        )
+        parts.append(
+            '_bc_hits=""; '
+            "while read -r _bc_key _bc_path; do "
+            '[ -z "$_bc_key" ] && continue; '
+            '_bc_ver="REZ_${_bc_key}_VERSION"; '
+            "_bc_name=\"$(printf '%s' \"$_bc_key\" | tr 'A-Z' 'a-z')-${!_bc_ver}\"; "
+            'case "$_bc_path" in ' + cases + "esac; "
+            "done <<< \"$(env | sed -n "
+            "'s/^REZ_\\([A-Z0-9_]*\\)_ROOT=\\(.*\\)$/\\1 \\2/p' | sort)\""
+        )
+        parts.append(
+            'if [ -n "$_bc_hits" ]; then '
+            'printf \"%b\\n\" \"${_bcG}  your packages in this '
+            'environment:$_bc_hits${_bc0}\"; '
+            "else "
+            'printf \"%s\\n\" \"${_bcR}  none of your local or dev packages '
+            'are in this environment${_bc0}\"; '
+            "fi"
+        )
+
+    parts.append("echo")
+    return "; ".join(parts)
+
+
+def _escape(text: str) -> str:
+    """Text safe inside a double-quoted shell string."""
+    return text.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("`", "\\`")
+
+
+def context_preamble(
+    command: str,
+    roots: Sequence[tuple[str, str]] = (),
+    notes: Sequence[tuple[str, str]] = (),
+) -> str:
     """Print the resolved context, then become the application.
 
     ``exec`` on purpose: the shell replaces itself with the DCC rather than
@@ -283,13 +325,13 @@ def context_preamble(command: str, roots: Sequence[tuple[str, str]] = ()) -> str
     ``rez-context`` prints the same table rez shows when you enter an
     interactive resolved shell -- requested packages, resolved packages, the
     lot -- and colours it when stdout is a terminal, which here it is.
-    :func:`mine_summary` then says which of those forty-odd lines are yours,
-    which rez cannot know.
+    :func:`launch_banner` then says which of those forty-odd lines are yours,
+    and what this window switched off, neither of which rez can know.
     """
     parts = ["rez-context 2>/dev/null", "echo"]
-    summary = mine_summary(roots)
-    if summary:
-        parts.append(summary)
+    banner = launch_banner(roots, notes)
+    if banner:
+        parts.append(banner)
     parts.append("exec %s" % shlex.quote(command))
     return "; ".join(parts)
 
@@ -299,6 +341,7 @@ def rez_argv(
     command: str = "",
     show_info: bool | None = None,
     roots: Sequence[tuple[str, str]] = (),
+    notes: Sequence[tuple[str, str]] = (),
 ) -> list[str]:
     """The rez invocation itself, without a terminal around it.
 
@@ -314,7 +357,7 @@ def rez_argv(
     if show_info is None:
         show_info = config.show_resolve_info()
     if show_info:
-        argv += ["--", "bash", "-c", context_preamble(command, roots)]
+        argv += ["--", "bash", "-c", context_preamble(command, roots, notes)]
     else:
         argv += ["--", command]
     return argv
@@ -324,6 +367,7 @@ def build_script(
     packages: Sequence[str],
     command: str = "",
     roots: Sequence[tuple[str, str]] = (),
+    notes: Sequence[tuple[str, str]] = (),
 ) -> str:
     """A shell one-liner that echoes the command, runs it, and holds on failure.
 
@@ -336,7 +380,8 @@ def build_script(
     the first question is always what was actually asked for.
     """
     inner = " ".join(
-        shlex.quote(part) for part in rez_argv(packages, command, roots=roots)
+        shlex.quote(part)
+        for part in rez_argv(packages, command, roots=roots, notes=notes)
     )
     hold = config.HOLD_TERMINAL
 
@@ -358,6 +403,7 @@ def expand(
     packages: Sequence[str],
     command: str = "",
     roots: Sequence[tuple[str, str]] = (),
+    notes: Sequence[tuple[str, str]] = (),
 ) -> list[str]:
     """Build an argv from ``template``.
 
@@ -369,7 +415,7 @@ def expand(
     argv: list[str] = []
     for part in template:
         if "{script}" in part:
-            argv.append(build_script(packages, command, roots))
+            argv.append(build_script(packages, command, roots, notes))
         elif "{packages}" in part:
             argv.extend(packages)
         elif "{command}" in part:
@@ -389,9 +435,10 @@ def build_command(
     packages: Sequence[str],
     command: str,
     roots: Sequence[tuple[str, str]] = (),
+    notes: Sequence[tuple[str, str]] = (),
 ) -> list[str]:
     """Argv that resolves ``packages`` and runs ``command`` in a terminal."""
-    return expand(config.LAUNCH_COMMAND, packages, command, roots)
+    return expand(config.LAUNCH_COMMAND, packages, command, roots, notes)
 
 
 def build_terminal_command(packages: Sequence[str]) -> list[str]:
@@ -411,9 +458,10 @@ def command_preview(
     packages: Sequence[str],
     command: str,
     roots: Sequence[tuple[str, str]] = (),
+    notes: Sequence[tuple[str, str]] = (),
 ) -> str:
     """A copy-pasteable representation of what :func:`launch` will run."""
-    return _preview(project, build_command(packages, command, roots))
+    return _preview(project, build_command(packages, command, roots, notes))
 
 
 def terminal_preview(project: Project, packages: Sequence[str]) -> str:
@@ -429,11 +477,12 @@ def launch(
     include_roots: Sequence[str] = (),
     dry_run: bool = False,
     roots: Sequence[tuple[str, str]] = (),
+    notes: Sequence[tuple[str, str]] = (),
 ) -> subprocess.Popen | None:
     """Resolve ``packages`` and start ``command``, detached."""
     return _spawn(
         project,
-        build_command(packages, command, roots),
+        build_command(packages, command, roots, notes),
         exclude_roots,
         include_roots,
         dry_run,

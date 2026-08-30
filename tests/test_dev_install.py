@@ -17,7 +17,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
 from bootycall import config, dev_install  # noqa: E402
-from bootycall.local_packages import LocalPackage, list_local_packages  # noqa: E402
+from bootycall.local_packages import (  # noqa: E402
+    LocalPackage,
+    definition_mismatch,
+    list_local_packages,
+)
 
 failures: list[str] = []
 
@@ -129,10 +133,13 @@ config.DEV_INSTALL_COMMAND = saved_command
 print("\nsymlinking")
 ok, message = dev_install.symlink(WORKING / "anim_tools", INSTALLED)
 check("linked", ok, message)
-check("and it is a link, not a copy", (INSTALLED / "anim_tools").is_symlink())
+# rez finds a package by directory and reads its name from the definition, so
+# the link has to be laid out <root>/<declared name>/<declared version>.
+_linked_at = INSTALLED / "anim_tools" / "1.0.0"
+check("and it is a link, not a copy", _linked_at.is_symlink(), str(_linked_at))
 check(
     "pointing at the working copy",
-    (INSTALLED / "anim_tools").resolve() == (WORKING / "anim_tools").resolve(),
+    _linked_at.resolve() == (WORKING / "anim_tools").resolve(),
 )
 ok, message = dev_install.symlink(WORKING / "anim_tools", INSTALLED)
 check("re-linking replaces the old link rather than failing", ok, message)
@@ -140,6 +147,38 @@ check("re-linking replaces the old link rather than failing", ok, message)
 refused, message = dev_install.symlink(WORKING / "nuke_utils", INSTALLED)
 check("but it will not quietly replace a real installed package", not refused)
 check("saying so plainly", "real directory" in message, message)
+
+print("\na checkout folder named something else still links correctly")
+_odd = ROOT / "checkouts" / "rig-utils-WIP"
+_odd.mkdir(parents=True)
+(_odd / "package.py").write_text("name = 'rig_utils'\nversion = '1.8.666'\n")
+# Its own destination: the shared one is enumerated by later checks, and a
+# fixture that quietly grows is a fixture that starts failing elsewhere.
+_odd_dest = ROOT / "odd_dest"
+_odd_dest.mkdir()
+ok, message = dev_install.symlink(_odd, _odd_dest)
+check("linked", ok, message)
+check(
+    "under the name the package declares, not the folder it lives in",
+    (_odd_dest / "rig_utils" / "1.8.666").is_symlink(),
+    str(sorted(p.name for p in _odd_dest.iterdir())),
+)
+check(
+    "and nothing is named after the checkout folder",
+    not (_odd_dest / "rig-utils-WIP").exists(),
+)
+_found_odd = list_local_packages(_odd_dest, exclude=())
+check("rez sees one package there", len(_found_odd) == 1, str(_found_odd))
+check(
+    "with the version the definition declares",
+    _found_odd[0].version == "1.8.666",
+    _found_odd[0].version,
+)
+check(
+    "and no name or version mismatch, which is what used to make it invisible",
+    definition_mismatch(_found_odd[0]) == "",
+    definition_mismatch(_found_odd[0]),
+)
 
 print("\nwhich installs are behind their working copies")
 installed_packages = list_local_packages(INSTALLED, exclude=())

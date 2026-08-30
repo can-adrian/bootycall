@@ -30,6 +30,7 @@ from . import config
 from .local_packages import (
     DEFINITION_FILES,
     LocalPackage,
+    definition_fields,
     dev_working_root,
     version_key,
 )
@@ -183,7 +184,22 @@ def symlink(source: Path | str, dest_root: Path | str) -> tuple[bool, str]:
     if not _definition_in(source_path):
         return False, "%s has no package definition in it" % source_path
 
-    dest = Path(dest_root) / source_path.name
+    # The link has to be named for what the package *declares*, not for the
+    # folder it happens to live in. rez reads the definition but finds the
+    # package by directory: a checkout called rig_utils_dev whose package.py
+    # says name = "rig_utils" is a package rez sees the name of and then
+    # discards, because the directory disagrees. Linking under the folder name
+    # produced exactly the mismatch the package lists flag in red.
+    fields = definition_fields(source_path)
+    name = fields.get("name") or source_path.name
+    version = fields.get("version", "")
+
+    dest = Path(dest_root) / name
+    if version:
+        # And the version level is a directory too, for the same reason: rez
+        # takes a package's version from the directory it sits in.
+        dest = dest / version
+
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
     except OSError as exc:

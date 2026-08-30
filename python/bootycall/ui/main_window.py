@@ -2106,6 +2106,7 @@ class MainWindow(QMainWindow):
             self.resolved_packages(),
             self._active_dcc.run_command,
             self.highlight_roots(),
+            self.launch_notes(),
         )
         QApplication.clipboard().setText(preview)
         self.statusBar().showMessage("Copied: %s" % preview, 5000)
@@ -2289,6 +2290,48 @@ class MainWindow(QMainWindow):
         if self.local_frame.is_checked():
             roots.append(("local", str(local_root())))
         return tuple(roots)
+
+    def launch_notes(self) -> tuple[tuple[str, str], ...]:
+        """What this window did to the environment that rez cannot report.
+
+        rez prints what resolved. It has no idea you switched a package root
+        off before launching -- that happened in a window it never saw -- and
+        an artist who forgot they did it has no way to find out from inside the
+        session. These are the things that are true because of BootyCall, said
+        where the consequences turn up.
+        """
+        notes: list[tuple[str, str]] = []
+
+        if not self.local_frame.is_checked():
+            notes.append(
+                ("warn", "Local packages are switched OFF for this launch")
+            )
+        if not self.dev_frame.is_checked():
+            notes.append(
+                ("warn", "Installed dev packages are switched OFF for this launch")
+            )
+        elif self._disabled_dev:
+            present = sorted(
+                {p.name for p in self._dev_packages} & self._disabled_dev
+            )
+            if present:
+                notes.append(
+                    (
+                        "warn",
+                        "Dev packages switched off: %s" % ", ".join(present),
+                    )
+                )
+
+        missing = self.missing_from_rez_path()
+        if missing:
+            notes.append(
+                (
+                    "",
+                    "Roots BootyCall added that rez is not configured to read: %s"
+                    % ", ".join(missing),
+                )
+            )
+        return tuple(notes)
 
     def missing_from_rez_path(self) -> tuple[str, ...]:
         """Roots in play that rez's own configuration does not list.
@@ -2746,6 +2789,7 @@ class MainWindow(QMainWindow):
                 self.excluded_roots(),
                 self.included_roots(),
                 roots=self.highlight_roots(),
+                notes=self.launch_notes(),
             )
         except OSError as exc:
             QMessageBox.critical(

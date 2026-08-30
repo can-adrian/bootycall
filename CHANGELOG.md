@@ -10,6 +10,34 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.7.0
+
+Minor: the launch argv carries more than it did.
+
+- **Symlink installs under the name the package declares**, not the folder it
+  lives in — and under its declared version as a directory level. A checkout
+  called `rig-utils-WIP` whose `package.py` says `name = "rig_utils"` was being
+  linked as `rig-utils-WIP`, producing precisely the name mismatch the package
+  lists flag in red, and a package rez reads and then discards. Now it lands at
+  `<dev root>/rig_utils/1.8.666`.
+- **The launch prints a short report under rez's table**, in colour on a
+  terminal and plain when piped:
+
+  ```
+  BootyCall - what this window changed about the environment
+    Local packages are switched OFF for this launch
+    Dev packages switched off: houdini_utils
+    your packages in this environment:
+      rig_utils-1.8.666  (dev)
+      base-6.56.1  (local)
+  ```
+
+  The warnings come from the window, because rez cannot know you switched a
+  root off — that happened somewhere it never saw. The package list comes from
+  `REZ_<NAME>_ROOT` in the resolved environment, because nothing else knows what
+  really happened. Escape codes are set once behind `[ -t 1 ]`, so a launch
+  whose output lands in a log file has no colour codes in it.
+
 ## 0.6.4
 
 - **Symlinked installs read `(symlinked)`**, with the working copy's path on the

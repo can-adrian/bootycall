@@ -498,13 +498,22 @@ BootyCall: resolved from your own package roots:
   base-6.56.1  (local)
 ```
 
-Read out of `REZ_<NAME>_ROOT` in the resolved environment rather than from
-anything BootyCall predicted, because this line has to be true. The dev root is
-matched before the local root it sits inside, or everything in it would read
-`(local)`.
+Above that list go the things **rez cannot know**, because they happened in a
+window it never saw: a package section switched off, individual dev packages
+unticked, roots on the path only because BootyCall put them there. An artist who
+forgot they unticked something has no other way to find out from inside the
+session.
+
+The package list is read out of `REZ_<NAME>_ROOT` in the resolved environment
+rather than from anything BootyCall predicted, because this line has to be true.
+The dev root is matched before the local root it sits inside, or everything in
+it would read `(local)`.
 
 The line printed when nothing matches is the one that earns the feature:
 *none of your local or dev packages are in this environment.*
+
+Colours are set once behind `[ -t 1 ]` and blanked otherwise, so a launch whose
+output lands in a log file has no escape codes in it.
 
 ### When it fails
 

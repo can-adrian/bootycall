@@ -2763,6 +2763,68 @@ _tip = _style.split("QToolTip", 1)[1].split("}", 1)[0]
 check("with its own background", "background:" in _tip, _tip)
 check("and its own colour", "color:" in _tip, _tip)
 
+print("\nthe launch says what this window switched off")
+pin("batman_returns")
+QApplication.processEvents()
+check("nothing to report while everything is on", window.launch_notes() == (), str(window.launch_notes()))
+
+window.local_frame.set_checked(False)
+QApplication.processEvents()
+_notes = window.launch_notes()
+check(
+    "switching local off is reported",
+    any("Local packages are switched OFF" in t for _l, t in _notes),
+    str(_notes),
+)
+check("as a warning", all(l == "warn" for l, t in _notes if "Local" in t), str(_notes))
+
+window.dev_frame.set_checked(False)
+QApplication.processEvents()
+check(
+    "and so is switching dev off",
+    any("dev packages are switched OFF" in t for _l, t in window.launch_notes()),
+    str(window.launch_notes()),
+)
+
+window.local_frame.set_checked(True)
+window.dev_frame.set_checked(True)
+QApplication.processEvents()
+_first_dev = window.dev_list.item(0).data(_NAME_ROLE)
+window.dev_list.item(0).setCheckState(Qt.Unchecked)
+QApplication.processEvents()
+check(
+    "unticking one dev package is named, not just counted",
+    any(
+        "Dev packages switched off" in t and _first_dev in t
+        for _l, t in window.launch_notes()
+    ),
+    str(window.launch_notes()),
+)
+window.dev_list.item(0).setCheckState(Qt.Checked)
+QApplication.processEvents()
+
+_argv = launcher.build_command(
+    window.resolved_packages(),
+    "maya",
+    window.highlight_roots(),
+    (("warn", "Local packages are switched OFF for this launch"),),
+)
+_script = _argv[-1]
+check(
+    "the banner reaches the launch command",
+    "what this window changed about the environment" in _script,
+    _script[:160],
+)
+check(
+    "with the note in it",
+    "Local packages are switched OFF" in _script,
+    _script[:200],
+)
+check(
+    "and the resolved-package summary as well",
+    "your packages in this environment" in _script,
+)
+
 print("\nfavourites window")
 from bootycall.configs import SavedConfig as _SC  # noqa: E402
 from bootycall.ui.config_menu import ConfigMenuAction  # noqa: E402
