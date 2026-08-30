@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
+import tempfile
 import sys
 from pathlib import Path
 
@@ -304,19 +306,25 @@ check(
     str(_with_info),
 )
 check(
-    "which prints the same table an interactive rez shell prints",
-    "rez-context" in _with_info[-1],
+    "the argv is a bare path, with nothing in it for a shell to get wrong",
+    _with_info[-1] == shlex.quote(_with_info[-1]),
     _with_info[-1],
+)
+_written = Path(_with_info[-1]).read_text()
+check(
+    "which prints the same table an interactive rez shell prints",
+    "rez-context" in _written,
+    _written[:120],
 )
 check(
     "and execs the app, so nothing extra is left in the process tree",
-    "exec maya" in _with_info[-1],
-    _with_info[-1],
+    "exec maya" in _written,
+    _written[-40:],
 )
 check(
     "a missing rez-context does not stop the launch",
-    "2>/dev/null" in _with_info[-1],
-    _with_info[-1],
+    "2>/dev/null" in _written,
+    _written[:120],
 )
 check(
     "a shell needs none of it - rez prints the table itself on the way in",
@@ -379,19 +387,20 @@ check(
 )
 
 _argv = launcher.rez_argv(("a-1",), "maya", roots=_roots)
+_written = Path(_argv[-1]).read_text()
 check(
     "the launch carries it",
-    "your packages in this environment" in _argv[-1],
-    _argv[-1][:120],
+    "your packages in this environment" in _written,
+    _written[:120],
 )
 check(
     "and still execs the application afterwards",
-    _argv[-1].rstrip().endswith("exec maya"),
-    _argv[-1][-40:],
+    _written.rstrip().endswith("exec maya"),
+    _written[-40:],
 )
 check(
     "the dev root is tested before the local one it sits inside",
-    _argv[-1].index("l0=dev") < _argv[-1].index("l1=local"),
+    _written.index("l0=dev") < _written.index("l1=local"),
     "dev must be tested first, or every dev package inside the local root "
     "reports as local",
 )
@@ -482,13 +491,51 @@ for _shell in ("sh", "dash", "bash"):
         (_out.stderr or _out.stdout)[:200],
     )
 
+print("\nand it survives rez re-quoting the command")
+# rez does not run the argv it is handed. It writes the whole thing into a
+# rez-shell.sh of its own, inside double quotes, and runs that. Anything
+# quoted stops being quoted on the way through: single quotes go literal, $1
+# in an awk program gets expanded, $(...) runs at the wrong moment. Two
+# releases went out trying to write a one-liner that survives it.
+#
+# So: paste the argv into a script the way rez does, and run it.
+_requote_argv = launcher.rez_argv(("a-1",), "true", roots=_roots)
+_after = _requote_argv[_requote_argv.index("--") + 1:]
+_requoted = tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False)
+_requoted.write("#!/bin/bash\n")
+for _k, _v in (
+    ("REZ_RIG_UTILS_ROOT", "/ice/local/adts/dev/rig_utils/1.8.666"),
+    ("REZ_RIG_UTILS_VERSION", "1.8.666"),
+):
+    _requoted.write("export %s=%s\n" % (_k, _v))
+_requoted.write("%s\n" % " ".join(_after))
+_requoted.close()
+_out = subprocess.run(
+    ["bash", _requoted.name], capture_output=True, text=True
+)
+check(
+    "the command rez pastes into its own script still runs",
+    _out.returncode == 0 and not _out.stderr,
+    (_out.stderr or "clean")[:300],
+)
+check(
+    "and still reports",
+    "rig_utils-1.8.666  (dev)" in _out.stdout,
+    _out.stdout[:300],
+)
+check(
+    "because every argument is a bare word rez cannot damage",
+    all(part == shlex.quote(part) for part in _after),
+    str(_after),
+)
+
 print("\nthe terminal gets the report too")
-_term = launcher.rez_argv((), "", roots=_roots)
+_term = Path(launcher.rez_argv((), "", roots=_roots)[-1]).read_text()
 check(
     "a shell with something to report is started behind the banner",
-    _term[-1].rstrip().endswith("exec bash")
-    and "your packages in this environment" in _term[-1],
-    _term[-1][-60:],
+    _term.rstrip().endswith("exec bash")
+    and "your packages in this environment" in _term,
+    _term[-60:],
 )
 check(
     "with nothing to report it stays a bare rez-env, which prints rez's own",

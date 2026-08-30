@@ -10,6 +10,36 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.9.0
+
+Minor: the launch is a script on disk now, not a shell one-liner.
+
+- **The preamble is written to a file and rez is pointed at it.** rez does not
+  run the argv it is handed — it writes the whole thing into a `rez-shell.sh`
+  of its own, *inside double quotes*, and runs that. Everything quoted stops
+  being quoted on the way through: the single quotes round the awk program go
+  literal, `$1` inside it gets expanded by the shell, and the `$(...)` runs at
+  the wrong moment. What came out was `syntax error near unexpected token '('`
+  and a failed launch.
+
+  Two releases went out trying to write a one-liner that survives that. There
+  isn't one. The argv is now `rez-env <pkgs> -- bash /tmp/bootycall-<uid>/launch-xxxx.sh`
+  — four bare words with nothing in them for a shell to get wrong.
+
+- **The script is readable, and it stays.** Real lines, real indentation,
+  comments. It is not deleted after the launch (a detached DCC is still the
+  child of a shell reading it), so the last thing you ran is sitting there to
+  be looked at when a launch goes somewhere you did not expect. Anything older
+  than a day is cleared out on the way in.
+
+- **`BOOTYCALL_SCRIPT_DIR`** picks where they go. Unset means `$TMPDIR`, then
+  the platform default — the same rule everything else on the box follows.
+  Point it at `/var/tmp` to keep scripts across a reboot. rez's own
+  `rez_context_*` directories are its business and follow `$TMPDIR` too.
+
+- Tests now paste the argv into a script the way rez does and run *that*. The
+  previous two versions passed every check and could not launch.
+
 ## 0.8.1
 
 Patch: the report from 0.8.0 ran, then died on the shell it was written for.

@@ -906,6 +906,7 @@ the ones below, and are handy for pointing a session at a test tree:
 | `BOOTYCALL_TERMINAL_EMULATOR` | first of gnome-terminal, konsole, xfce4-terminal, alacritty, kitty, xterm found on PATH |
 | `BOOTYCALL_HOLD_TERMINAL` | `error` (also `always`, `never`) |
 | `BOOTYCALL_SHOW_RESOLVE_INFO` | `1` |
+| `BOOTYCALL_SCRIPT_DIR` | `$TMPDIR`, else the platform default (`/tmp`) |
 | `BOOTYCALL_LAUNCH_COMMAND` | `<detected terminal> bash -c {script}` |
 | `BOOTYCALL_TERMINAL_COMMAND` | `<detected terminal> bash -c {script}` |
 | `BOOTYCALL_CONFIG_FILE` | `$XDG_CONFIG_HOME/bootycall/configs.json` |

@@ -285,6 +285,17 @@ def show_resolve_info() -> bool:
     return SHOW_RESOLVE_INFO
 
 
+#: Where the launch script goes. Empty means "wherever Python puts temporary
+#: files", which honours ``$TMPDIR`` and lands in ``/tmp`` when nothing says
+#: otherwise. Set this to somewhere that survives a reboot -- ``/var/tmp`` --
+#: if you want to be able to read back the script from a launch that went wrong
+#: yesterday. rez's own context directories are unaffected either way: those
+#: are rez's, and it puts them where ``$TMPDIR`` says too.
+#:
+#: Override with BOOTYCALL_SCRIPT_DIR.
+SCRIPT_DIR = os.environ.get("BOOTYCALL_SCRIPT_DIR", "").strip()
+
+
 #: When to keep the terminal open after the command finishes:
 #: ``error`` (default), ``always``, or ``never``. A terminal that closes on
 #: failure takes the error message with it, which is the single most annoying

@@ -16,6 +16,8 @@ import os
 import shlex
 import subprocess
 import sys
+import tempfile
+import time
 from dataclasses import dataclass, field
 from typing import Sequence
 
@@ -225,25 +227,18 @@ def resolved_for(probe: ResolveProbe, name: str) -> tuple[str, str]:
     return probe.version_of(_rez_env_key(name))
 
 
-def _colour_setup() -> str:
-    """Shell that fills colour variables, or blanks them when piped.
-
-    Escapes are put in variables rather than written inline so the whole banner
-    degrades to plain text in one place. A launcher's output ends up in log
-    files as often as in terminals, and escape codes in a log are worse than no
-    colour in a terminal.
-    """
-    return (
-        "if [ -t 1 ]; then "
-        "_bcB=$(printf '\\033[1m'); _bcG=$(printf '\\033[32m'); "
-        "_bcY=$(printf '\\033[33m'); _bcR=$(printf '\\033[31m'); "
-        "_bcD=$(printf '\\033[2m'); _bc0=$(printf '\\033[0m'); "
-        "else _bcB=; _bcG=; _bcY=; _bcR=; _bcD=; _bc0=; fi"
-    )
-
-
 #: Colour per note level, as a shell variable name.
 _LEVELS = {"ok": "_bcG", "warn": "_bcY", "error": "_bcR", "": "_bcD"}
+
+
+def _escape(text: str) -> str:
+    """Text safe inside a double-quoted shell string."""
+    return (
+        text.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("$", "\\$")
+        .replace("`", "\\`")
+    )
 
 
 def launch_banner(
@@ -260,124 +255,194 @@ def launch_banner(
     ``notes`` are decided in Python, where the switches live. The package list
     is read from ``REZ_<NAME>_ROOT`` in the resolved environment, because that
     is the only place that knows what actually happened.
+
+    Returned as ordinary multi-line shell, because it goes into a file. See
+    :func:`preamble_text` for why that matters.
     """
     if not roots and not notes:
         return ""
 
-    parts = [_colour_setup()]
-    parts.append(
-        "printf '%s\\n' \"${_bcB}BootyCall${_bc0}${_bcD} - what this window "
-        "changed about the environment${_bc0}\""
-    )
+    lines = [
+        "if [ -t 1 ]; then",
+        "    _bcB=$(printf '\\033[1m')",
+        "    _bcG=$(printf '\\033[32m')",
+        "    _bcY=$(printf '\\033[33m')",
+        "    _bcR=$(printf '\\033[31m')",
+        "    _bcD=$(printf '\\033[2m')",
+        "    _bc0=$(printf '\\033[0m')",
+        "else",
+        "    _bcB= _bcG= _bcY= _bcR= _bcD= _bc0=",
+        "fi",
+        "",
+        "printf '%s\\n' \"${_bcB}BootyCall${_bc0}${_bcD}"
+        " - what this window changed about the environment${_bc0}\"",
+    ]
 
     for level, text in notes:
-        colour = _LEVELS.get(level, "_bcD")
-        parts.append(
-            "printf '%%s\\n' \"${%s}  %s${_bc0}\"" % (colour, _escape(text))
+        lines.append(
+            "printf '%%s\\n' \"${%s}  %s${_bc0}\"" % (_LEVELS.get(level, "_bcD"), _escape(text))
         )
 
     if roots:
-        # One awk pass does the whole job: pair every REZ_<NAME>_ROOT with its
-        # REZ_<NAME>_VERSION, decide which of our roots the path sits under,
-        # and print the finished line. Then sort, then indent.
-        #
-        # The shell used to do the pairing and matching itself. It needed
-        # ${!var} indirect expansion, which bash before 5.1 rejects here with
-        # "invalid indirect expansion" -- so the report died on exactly the
-        # Rocky boxes it was written for -- and a here-string, which is a
-        # bashism in a script rez generates and runs with whatever shell the
-        # site configured. Neither is worth carrying: awk has string keys, and
-        # a pipeline runs anywhere.
+        # One awk pass pairs every REZ_<NAME>_ROOT with its
+        # REZ_<NAME>_VERSION, works out which of our roots the path sits
+        # under, and prints the finished line. Doing the pairing in shell
+        # needs ${!var} indirect expansion, which bash before 5.1 refuses
+        # here -- and this script has to run under whatever shell the site
+        # configured, not the one it was written on.
         #
         # Slicing by $1 rather than splitting on "=" keeps values containing
         # "=" intact, which paths occasionally do. Roots arrive as -v
         # assignments so no path is ever pasted into the program text.
-        assigns = "".join(
-            " -v r%d=%s -v l%d=%s"
-            % (i, shlex.quote(root), i, shlex.quote(label))
+        assigns = " ".join(
+            "-v r%d=%s -v l%d=%s" % (i, shlex.quote(root), i, shlex.quote(label))
             for i, (label, root) in enumerate(roots)
         )
         # First match wins, so the caller's order decides: the dev root is
-        # nested inside the local one, and reversed every dev package would be
-        # reported as local.
-        tests = "".join(
-            'if (index(p, r%d "/") == 1) { print n "  (" l%d ")"; continue } '
+        # nested inside the local one, and reversed every dev package would
+        # be reported as local.
+        tests = "\n".join(
+            '            if (index(p, r%d "/") == 1) { print n "  (" l%d ")"; continue }'
             % (i, i)
             for i in range(len(roots))
         )
-        program = (
-            "/^REZ_[A-Z0-9_]*_ROOT=/ "
-            "{ k = substr($1, 5, length($1) - 9); "
-            "r[k] = substr($0, length($1) + 2) } "
-            "/^REZ_[A-Z0-9_]*_VERSION=/ "
-            "{ k = substr($1, 5, length($1) - 12); "
-            "v[k] = substr($0, length($1) + 2) } "
-            "END { for (k in r) { "
-            'n = (v[k] != "" ? tolower(k) "-" v[k] : tolower(k)); '
-            "p = r[k]; " + tests + "} }"
-        )
-        parts.append(
-            "_bc_hits=$(env | awk -F="
-            + assigns
-            + " '"
-            + program
-            + "' | sort | sed 's/^/    /')"
-        )
-        parts.append(
-            'if [ -n "$_bc_hits" ]; then '
-            "printf '%s\\n%s\\n' \"${_bcG}  your packages in this "
-            'environment:" "$_bc_hits${_bc0}"; '
-            "else "
-            "printf '%s\\n' \"${_bcR}  none of your local or dev packages "
-            'are in this environment${_bc0}"; '
-            "fi"
-        )
+        lines += [
+            "",
+            "_bc_hits=$(env | awk -F= %s '" % assigns,
+            "    /^REZ_[A-Z0-9_]*_ROOT=/ {",
+            "        k = substr($1, 5, length($1) - 9)",
+            "        root[k] = substr($0, length($1) + 2)",
+            "    }",
+            "    /^REZ_[A-Z0-9_]*_VERSION=/ {",
+            "        k = substr($1, 5, length($1) - 12)",
+            "        ver[k] = substr($0, length($1) + 2)",
+            "    }",
+            "    END {",
+            "        for (k in root) {",
+            '            n = (ver[k] != "" ? tolower(k) "-" ver[k] : tolower(k))',
+            "            p = root[k]",
+            tests,
+            "        }",
+            "    }' | sort | sed 's/^/    /')",
+            "",
+            'if [ -n "$_bc_hits" ]; then',
+            "    printf '%s\\n%s\\n'"
+            ' "${_bcG}  your packages in this environment:" "$_bc_hits${_bc0}"',
+            "else",
+            "    printf '%s\\n'"
+            ' "${_bcR}  none of your local or dev packages are in this'
+            ' environment${_bc0}"',
+            "fi",
+        ]
 
-    parts.append("echo")
-    return "; ".join(parts)
-
-
-def _escape(text: str) -> str:
-    """Text safe inside a double-quoted shell string."""
-    return text.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("`", "\\`")
+    lines.append("")
+    lines.append("echo")
+    return "\n".join(lines)
 
 
-def context_preamble(
-    command: str,
+def preamble_text(
+    command: str = "",
     roots: Sequence[tuple[str, str]] = (),
     notes: Sequence[tuple[str, str]] = (),
 ) -> str:
-    """Print the resolved context, then become the application.
+    """The whole script: print the context, print the report, then hand over.
 
-    ``exec`` on purpose: the shell replaces itself with the DCC rather than
-    sitting around as its parent, so the process tree is the same as it would
-    have been without the wrapper.
-
-    ``rez-context`` prints the same table rez shows when you enter an
+    ``rez-context`` prints the same table rez shows on the way into an
     interactive resolved shell -- requested packages, resolved packages, the
     lot -- and colours it when stdout is a terminal, which here it is.
     :func:`launch_banner` then says which of those forty-odd lines are yours,
     and what this window switched off, neither of which rez can know.
+
+    ``exec`` on purpose: the shell replaces itself with the application rather
+    than sitting around as its parent, so the process tree is the same as it
+    would have been without the wrapper. With no ``command`` it execs a shell
+    instead, which is the terminal case.
     """
-    parts = ["rez-context 2>/dev/null", "echo"]
+    body = [
+        "# Written by BootyCall. Read it, run it, delete it -- nothing here",
+        "# is precious, and it is here to be looked at when a launch goes",
+        "# somewhere you did not expect.",
+        "",
+        "rez-context 2>/dev/null",
+        "echo",
+        "",
+    ]
     banner = launch_banner(roots, notes)
     if banner:
-        parts.append(banner)
-    parts.append("exec %s" % shlex.quote(command))
-    return "; ".join(parts)
+        body.append(banner)
+        body.append("")
+    body.append("exec %s" % shlex.quote(command or "bash"))
+    body.append("")
+    return "\n".join(body)
 
 
-def shell_preamble(
+def script_dir() -> str:
+    """Where launch scripts are written, created if need be.
+
+    ``$TMPDIR`` when the environment sets one, otherwise the platform default
+    -- the same rule everything else on the box follows, so a site that
+    redirects temporary files redirects these too. Per-user and 0700, because
+    the script names the shows and packages you are working on.
+    """
+    base = config.SCRIPT_DIR or tempfile.gettempdir()
+    path = os.path.join(base, "bootycall-%d" % os.getuid())
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    return path
+
+
+def _prune_scripts(path: str, max_age: float = 86400.0) -> None:
+    """Delete launch scripts older than a day.
+
+    They cannot be deleted after use: the launch is detached, and a DCC that
+    takes a minute to start is still the child of a shell reading this file.
+    So they are cleaned up on the way in instead, which also leaves the last
+    one you ran sitting there to be read.
+    """
+    now = time.time()
+    try:
+        names = os.listdir(path)
+    except OSError:
+        return
+    for name in names:
+        full = os.path.join(path, name)
+        try:
+            if now - os.path.getmtime(full) > max_age:
+                os.unlink(full)
+        except OSError:
+            pass
+
+
+def write_preamble(
+    command: str = "",
     roots: Sequence[tuple[str, str]] = (),
     notes: Sequence[tuple[str, str]] = (),
 ) -> str:
-    """The same report, then an interactive shell instead of an application.
+    """Write the preamble to a file and return its path, or ``""`` on failure.
 
-    Giving ``rez-env`` a command costs you rez's own entry banner, so this puts
-    the equivalent table back with ``rez-context`` before handing over. Worth
-    the trade: the banner rez prints cannot say a root was switched off.
+    A file rather than ``bash -c '<one-liner>'`` because rez re-quotes the
+    command it is handed: it writes the whole thing into a ``rez-shell.sh`` of
+    its own inside double quotes, where our single quotes stop quoting, ``$1``
+    in an awk program gets expanded by the shell, and ``$(...)`` runs at the
+    wrong moment. Two releases went out trying to write a one-liner that
+    survives that, which is not a thing that exists. A path has nothing in it
+    for a shell to get wrong.
+
+    Returning ``""`` rather than raising: a temporary directory that cannot be
+    written to is a reason to launch without the report, not a reason not to
+    launch.
     """
-    return context_preamble("bash", roots, notes)
+    text = preamble_text(command, roots, notes)
+    try:
+        path = script_dir()
+        _prune_scripts(path)
+        handle, name = tempfile.mkstemp(
+            prefix="launch-", suffix=".sh", dir=path, text=True
+        )
+        with os.fdopen(handle, "w") as stream:
+            stream.write(text)
+        return name
+    except OSError:
+        return ""
 
 
 def rez_argv(
@@ -392,23 +457,22 @@ def rez_argv(
     With no command this drops you in an interactive resolved shell. Bare
     ``rez-env`` prints rez's context on the way in for free, so that is what
     runs when there is nothing of our own to add. When there *is* -- a root
-    switched off, a dev package to point at -- the shell is started behind
-    :func:`shell_preamble` instead, which prints the same table via
-    ``rez-context`` and then the BootyCall report. Without this the terminal
-    was the one launch path the report never reached.
+    switched off, a dev package to point at, an application to run -- it goes
+    behind :func:`preamble_text`, written to a file by :func:`write_preamble`.
+
+    A file, not ``bash -c``: rez re-quotes whatever command it is given, and
+    nothing quoted survives the trip. See :func:`write_preamble`.
     """
     argv = ["rez-env", *packages]
     if show_info is None:
         show_info = config.show_resolve_info()
 
-    if not command:
-        if show_info and (roots or notes):
-            argv += ["--", "bash", "-c", shell_preamble(roots, notes)]
-        return argv
+    wanted = show_info and (command or roots or notes)
+    script = write_preamble(command, roots, notes) if wanted else ""
+    if script:
+        return argv + ["--", "bash", script]
 
-    if show_info:
-        argv += ["--", "bash", "-c", context_preamble(command, roots, notes)]
-    else:
+    if command:
         argv += ["--", command]
     return argv
 

@@ -345,20 +345,33 @@ print("\ncommand preview")
 from bootycall import launcher  # noqa: E402
 from bootycall import local_packages as _lp  # noqa: E402
 
+
+def preamble(text):
+    """The launch script rez is pointed at, read back.
+
+    The preamble is a file rather than an inline one-liner because rez
+    re-quotes the command it is handed. So a check on what the launch prints
+    has to open the file the argv names.
+    """
+    import re as _re
+
+    found = _re.search(r"\S*launch-\w+\.sh", text)
+    return Path(found.group(0)).read_text() if found else text
+
 preview = launcher.command_preview(
     window.current_project(), window.resolved_packages(), window._active_dcc.run_command
 )
 check("preview mentions show path", "/tmp/ice/shows/batman_returns" in preview, preview)
 check(
     "preview runs the DCC executable",
-    "exec maya" in launcher.rez_argv(
+    "exec maya" in preamble(launcher.rez_argv(
         window.resolved_packages(), window._active_dcc.run_command
-    )[-1],
+    )[-1]),
     str(launcher.rez_argv(window.resolved_packages(), "maya")[-1]),
 )
 check(
     "and prints the resolve on the way in, as a terminal always did",
-    "rez-context" in launcher.rez_argv(window.resolved_packages(), "maya")[-1],
+    "rez-context" in preamble(launcher.rez_argv(window.resolved_packages(), "maya")[-1]),
     str(launcher.rez_argv(window.resolved_packages(), "maya")[-1]),
 )
 check("and resolves through rez", "rez-env" in preview, preview[:80])
@@ -1399,7 +1412,9 @@ check("runs it through a shell", launch_argv[-3:-1] == ["bash", "-c"], str(launc
 check("resolves with rez", "rez-env " in script, script[:80])
 check(
     "the executable is what the wrapper execs",
-    launcher.rez_argv(window.resolved_packages(), "nuke")[-1].endswith("exec nuke"),
+    preamble(
+        launcher.rez_argv(window.resolved_packages(), "nuke")[-1]
+    ).rstrip().endswith("exec nuke"),
     launcher.rez_argv(window.resolved_packages(), "nuke")[-1],
 )
 check(
@@ -1455,9 +1470,9 @@ window._dcc_buttons["houdinifx"].click()
 QApplication.processEvents()
 check(
     "switching DCC changes the executable, not just the packages",
-    launcher.rez_argv(
+    preamble(launcher.rez_argv(
         window.resolved_packages(), window._active_dcc.run_command
-    )[-1].endswith("exec houdini"),
+    )[-1]).rstrip().endswith("exec houdini"),
     launcher.rez_argv(
         window.resolved_packages(), window._active_dcc.run_command
     )[-1],
@@ -1518,9 +1533,9 @@ print("       %s" % launcher.terminal_preview(window.current_project(), term_pkg
 
 # The terminal used to be the one launch path the report never reached: with
 # no command, rez_argv returned before anything could be wrapped around it.
-_term_banner = launcher.build_terminal_command(
+_term_banner = preamble(launcher.build_terminal_command(
     term_pkgs, window.highlight_roots(), window.launch_notes()
-)[-1]
+)[-1])
 check(
     "the shell gets the same report a launch does",
     "your packages in this environment" in _term_banner,
@@ -2829,7 +2844,7 @@ _argv = launcher.build_command(
     window.highlight_roots(),
     (("warn", "Local packages are switched OFF for this launch"),),
 )
-_script = _argv[-1]
+_script = preamble(_argv[-1])
 check(
     "the banner reaches the launch command",
     "what this window changed about the environment" in _script,
