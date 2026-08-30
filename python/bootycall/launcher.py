@@ -16,6 +16,7 @@ import os
 import shlex
 import subprocess
 import sys
+from dataclasses import dataclass, field
 from typing import Sequence
 
 from . import config
@@ -123,6 +124,105 @@ def filtered_packages_path(
             still_there
         )
     return paths, ""
+
+
+@dataclass(frozen=True)
+class ResolveProbe:
+    """What rez actually resolved, as opposed to what we predicted."""
+
+    ok: bool = False
+    #: package name -> (version, root it came from)
+    resolved: dict[str, tuple[str, str]] = field(default_factory=dict)
+    #: rez's own words when the resolve failed.
+    error: str = ""
+    #: The command that was run, for the report.
+    command: str = ""
+
+    def version_of(self, name: str) -> tuple[str, str]:
+        return self.resolved.get(name, ("", ""))
+
+
+def _rez_env_key(name: str) -> str:
+    """rez's environment-variable spelling of a package name."""
+    cleaned = "".join(c if c.isalnum() else "_" for c in name)
+    return cleaned.upper()
+
+
+def resolve_probe(
+    project: Project,
+    packages: Sequence[str],
+    exclude_roots: Sequence[str] = (),
+    include_roots: Sequence[str] = (),
+    timeout: float = 300.0,
+) -> ResolveProbe:
+    """Run the real resolve and report what rez chose.
+
+    Everything else BootyCall says about which package wins is a prediction
+    from a directory scan. A scan can compare version numbers; it cannot
+    evaluate the ``requires`` of every package in the resolve, and a single
+    ``requires = ["rig_utils-1.7"]`` somewhere in the graph will pin a version
+    the scan says should have lost. That is not a gap worth closing by
+    reimplementing a solver -- there is already one, and this asks it.
+
+    ``rez-env ... -- printenv`` rather than parsing ``rez-context`` output:
+    rez sets ``REZ_<NAME>_VERSION`` and ``REZ_<NAME>_ROOT`` for every resolved
+    package, which is a documented contract rather than a human-readable table
+    whose columns move between versions.
+    """
+    argv = ["rez-env", *packages, "--", "printenv"]
+    overrides = {"ILP_SHOW": project.name, "BOOTYCALL_SHOW": project.name}
+    paths, _note = filtered_packages_path(exclude_roots, include_roots)
+    if paths:
+        overrides["REZ_PACKAGES_PATH"] = os.pathsep.join(paths)
+
+    env = os.environ.copy()
+    env.update(overrides)
+    shown = " ".join(shlex.quote(part) for part in argv)
+
+    try:
+        result = subprocess.run(  # noqa: S603
+            argv,
+            cwd=str(project.path),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return ResolveProbe(
+            error="the resolve was still going after %gs" % timeout, command=shown
+        )
+    except OSError as exc:
+        return ResolveProbe(error="could not run rez-env: %s" % exc, command=shown)
+
+    if result.returncode != 0:
+        return ResolveProbe(
+            error=(result.stderr or result.stdout or "").strip()
+            or "rez-env exited %d" % result.returncode,
+            command=shown,
+        )
+
+    versions: dict[str, str] = {}
+    roots: dict[str, str] = {}
+    for line in result.stdout.splitlines():
+        key, sep, value = line.partition("=")
+        if not sep or not key.startswith("REZ_"):
+            continue
+        if key.endswith("_VERSION"):
+            versions[key[4:-8]] = value.strip()
+        elif key.endswith("_ROOT"):
+            roots[key[4:-5]] = value.strip()
+
+    resolved = {
+        key: (version, roots.get(key, "")) for key, version in versions.items()
+    }
+    return ResolveProbe(ok=True, resolved=resolved, command=shown)
+
+
+def resolved_for(probe: ResolveProbe, name: str) -> tuple[str, str]:
+    """``(version, root)`` rez chose for ``name``, or ``("", "")``."""
+    return probe.version_of(_rez_env_key(name))
 
 
 def context_preamble(command: str) -> str:

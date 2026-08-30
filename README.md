@@ -199,7 +199,8 @@ between equal versions, it does not beat a higher one. A studio
 `rig_utils-1.9.0` wins over your `rig_utils-1.7.666` however early your root
 sits — and a `.666` patch number only helps inside the version it patches.
 
-BootyCall scans every root on the path and says which one wins. A build that
+**Everything above is a prediction.** BootyCall scans every root on the path and
+says which one wins. A build that
 loses reads **`outranked by 1.9.0`** in grey rather than an amber `overrides`,
 and the tooltip names the root it lost to. That scan answers "which version is
 highest", not "what will the full resolve do": it does not evaluate variants or
@@ -226,6 +227,22 @@ folder called `nuke_utils` whose `package.py` declares `nuke_utils_dev`, a
 error — each one is in the list, in the right root, on the path, and skipped by
 every resolve without a word. Those rows are now flagged in red. The definition
 is read with `ast`, never imported.
+
+#### Measuring instead of predicting
+
+**Edit → Test resolve with rez** runs the real thing: `rez-env <requests> --
+printenv`, with the same environment a launch gets, reading `REZ_<NAME>_VERSION`
+and `REZ_<NAME>_ROOT` back out. It reports your newest build against what rez
+actually resolved and from which root.
+
+Reach for it when the list says a package wins and the environment disagrees.
+The scan ranks version numbers; it cannot evaluate the `requires` of every
+package in the graph, and a single `requires = ["rig_utils-1.7"]` somewhere pins
+a version the ranking says should have won. That is not a gap worth closing by
+writing a second solver — there is one already, and this asks it.
+
+A resolve that fails outright is reported in rez's own words, which is usually
+the whole answer: nothing was picked up because nothing resolved.
 
 ### Dev packages: working copies and installed ones
 

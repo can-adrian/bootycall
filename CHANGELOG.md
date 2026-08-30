@@ -10,6 +10,26 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.5.5
+
+**Edit → Test resolve with rez** runs the actual resolve and reports what rez
+chose, instead of predicting it.
+
+Everything BootyCall said about which package wins was inference from directory
+listings. A listing can rank version numbers; it cannot evaluate the `requires`
+of every package in the graph, and one `requires = ["rig_utils-1.7"]` anywhere
+pins a version the ranking says should have won. 0.5.3 predicted a dev build
+would win when it did not — this is the difference between predicting and
+measuring, and it is why the feature exists.
+
+- Runs `rez-env <requests> -- printenv` with the same environment a launch gets
+  and reads `REZ_<NAME>_VERSION` / `REZ_<NAME>_ROOT` back. Those are a documented
+  contract; `rez-context`'s table is not.
+- Reports your newest build against what rez actually resolved and from which
+  root, flags the disagreement, and points at `rez-context --graph`.
+- A resolve that fails outright is reported as the answer, in rez's own words —
+  nothing was picked up because nothing resolved.
+
 ## 0.5.4
 
 - **Compact keeps its title bar**, titled `B.C.` — short enough that a bar the

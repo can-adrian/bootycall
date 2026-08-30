@@ -27,6 +27,7 @@ from .local_packages import (
     request_name,
     resolves_to,
     satisfies,
+    version_key,
 )
 
 
@@ -222,6 +223,89 @@ def report(window) -> str:
         "***\nexplain what is happening instead. A package with neither is not "
         "named by\nthis show's package list, so it changes nothing here."
     )
+    return "\n".join(lines)
+
+
+def resolve_report(window) -> str:
+    """Run the real resolve and compare it against what we predicted.
+
+    Everything in :func:`report` above is inference from directory listings.
+    This is measurement. Where the two disagree, the measurement is right and
+    the disagreement is the finding: a scan can rank versions, but only a
+    solver knows that something in the graph pinned one.
+    """
+    project = window.current_project()
+    requests = window.resolved_packages()
+    if project is None or not requests:
+        return "Pick a show and a tool first - there is nothing to resolve."
+
+    probe = launcher.resolve_probe(
+        project, requests, window.excluded_roots(), window.included_roots()
+    )
+
+    lines = ["BootyCall %s - what rez actually resolved" % __version__]
+    lines.append("show: %s" % project.name)
+    lines.append("command: %s" % probe.command)
+
+    if not probe.ok:
+        lines.append(_heading("the resolve failed"))
+        lines.append(probe.error)
+        lines.append("")
+        lines.append(
+            "That failure is the answer: nothing was picked up because nothing\n"
+            "resolved. The message above is rez's own."
+        )
+        return "\n".join(lines)
+
+    mine = list(window.enabled_dev_packages())
+    if window.local_frame.is_checked():
+        mine += list(window._local_packages)
+
+    named = {p.name for p in mine} & {request_name(r) for r in requests}
+    if not named:
+        lines.append(_heading("none of your packages are named by this resolve"))
+        lines.append("So there is nothing here that could have been picked up.")
+        return "\n".join(lines)
+
+    lines.append(_heading("your packages, as rez resolved them"))
+    for name in sorted(named):
+        version, root = launcher.resolved_for(probe, name)
+        yours = sorted(
+            (p.version for p in mine if p.name == name),
+            key=version_key,
+            reverse=True,
+        )
+        newest = yours[0] if yours else ""
+
+        lines.append("")
+        lines.append("  %s" % name)
+        lines.append("    your newest build: %s" % (newest or "<unversioned>"))
+        if not version:
+            lines.append(
+                "    *** rez did not resolve this package at all - it is in the "
+                "request list\n        but not in the resolved environment"
+            )
+            continue
+
+        lines.append("    rez resolved:      %s" % version)
+        lines.append("    from:              %s" % (root or "<unknown>"))
+        if version == newest:
+            lines.append("    >>> yours is the one in the environment")
+        else:
+            lines.append(
+                "    *** yours is NOT the one in the environment"
+            )
+            lines.append(
+                "        Your build is on the path and ranks highest by version, so\n"
+                "        something in the graph is pinning this: another package's\n"
+                "        requires, or a variant. Ask rez which:\n"
+                "          rez-env %s -- rez-context --graph" % name
+            )
+
+    lines.append(_heading("everything rez resolved"))
+    for key in sorted(probe.resolved):
+        version, root = probe.resolved[key]
+        lines.append("  %-32s %-14s %s" % (key.lower(), version, root))
     return "\n".join(lines)
 
 

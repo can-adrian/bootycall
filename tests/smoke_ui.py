@@ -2340,6 +2340,109 @@ QApplication.processEvents()
 unpin_all()
 pin("batman_returns")
 
+print("\nasking rez what it actually resolved")
+import stat  # noqa: E402
+
+_bin = Path(tempfile.mkdtemp(prefix="bootycall-fakerez-")) / "bin"
+_bin.mkdir(parents=True)
+_fake = _bin / "rez-env"
+_fake.write_text(
+    "#!/usr/bin/env bash\n"
+    "# Stands in for a graph that pins rig_utils below the newest build.\n"
+    'if [ -n "$BOOTYCALL_FAKE_FAIL" ]; then\n'
+    '  echo "PackageFamilyNotFoundError: no such package" >&2; exit 1\n'
+    "fi\n"
+    "export REZ_RIG_UTILS_VERSION=1.6.2\n"
+    "export REZ_RIG_UTILS_ROOT=/studio/rig_utils/1.6.2\n"
+    'while [ "$1" != "--" ] && [ $# -gt 0 ]; do shift; done\n'
+    'shift\n'
+    'exec "$@"\n'
+)
+_fake.chmod(_fake.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+_saved_path = os.environ["PATH"]
+os.environ["PATH"] = "%s:%s" % (_bin, _saved_path)
+
+# Reuse the precedence fixture: a dev build that outranks everything on disk.
+cfg_mod.set_path_overrides(
+    {
+        "shows_root": str(_pr_shows),
+        "local_root": str(_pr_local),
+        "dev_root": "{local}/dev",
+    }
+)
+(_pr_shows / "demo" / ".ilp" / "pipeline" / "config.py").write_text(
+    "from ilp_bootstrap import Bootstrap\n"
+    "class ProjectBootstrap(Bootstrap):\n"
+    "    packages = dict(maya=('maya-2026', 'rig_utils-1'))\n"
+)
+_put(_pr_local / "dev", "rig_utils", "1.8.666")
+window.reload_projects()
+QApplication.processEvents()
+unpin_all()
+pin("demo")
+QApplication.processEvents()
+
+_probe = launcher.resolve_probe(
+    window.current_project(),
+    window.resolved_packages(),
+    window.excluded_roots(),
+    window.included_roots(),
+)
+check("the resolve ran", _probe.ok, _probe.error[:100])
+check(
+    "and rez's own answer is read back",
+    launcher.resolved_for(_probe, "rig_utils") == ("1.6.2", "/studio/rig_utils/1.6.2"),
+    str(launcher.resolved_for(_probe, "rig_utils")),
+)
+check(
+    "a package rez did not resolve reads empty, not missing",
+    launcher.resolved_for(_probe, "not_in_the_resolve") == ("", ""),
+)
+
+_resolve_text = _diag.resolve_report(window)
+check(
+    "the report names the build the user made",
+    "your newest build: 1.8.666" in _resolve_text,
+    "\n".join(l for l in _resolve_text.splitlines() if "build" in l),
+)
+check(
+    "and what rez chose instead",
+    "rez resolved:      1.6.2" in _resolve_text,
+    "\n".join(l for l in _resolve_text.splitlines() if "resolved:" in l),
+)
+check(
+    "flagging the disagreement rather than glossing it",
+    "yours is NOT the one in the environment" in _resolve_text,
+    _resolve_text[:200],
+)
+check(
+    "and pointing at the only thing that can explain it",
+    "requires" in _resolve_text and "rez-context --graph" in _resolve_text,
+    "\n".join(l for l in _resolve_text.splitlines() if "requires" in l),
+)
+
+os.environ["BOOTYCALL_FAKE_FAIL"] = "1"
+_failed = _diag.resolve_report(window)
+check(
+    "a failed resolve is reported as the answer, not hidden",
+    "the resolve failed" in _failed and "PackageFamilyNotFound" in _failed,
+    _failed[:200],
+)
+del os.environ["BOOTYCALL_FAKE_FAIL"]
+
+check(
+    "the Edit menu offers it",
+    window.resolve_test_action in window.edit_menu.actions(),
+    str([a.text() for a in window.edit_menu.actions()]),
+)
+
+os.environ["PATH"] = _saved_path
+cfg_mod.set_path_overrides({})
+window.reload_projects()
+QApplication.processEvents()
+unpin_all()
+pin("batman_returns")
+
 print("\nfavourites window")
 from bootycall.configs import SavedConfig as _SC  # noqa: E402
 from bootycall.ui.config_menu import ConfigMenuAction  # noqa: E402

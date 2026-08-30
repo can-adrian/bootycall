@@ -499,6 +499,15 @@ class MainWindow(QMainWindow):
         self.diagnostics_action.triggered.connect(self.show_diagnostics)
         self.addAction(self.diagnostics_action)
 
+        self.resolve_test_action = QAction("&Test resolve with rez...", self)
+        self.resolve_test_action.setToolTip(
+            "Run the real resolve and report what rez chose. Everything else "
+            "BootyCall says about which package wins is a prediction; this is "
+            "the measurement."
+        )
+        self.resolve_test_action.triggered.connect(self.run_resolve_test)
+        self.addAction(self.resolve_test_action)
+
         self.quit_action = QAction("&Quit", self)
         self.quit_action.setShortcut(QKeySequence.Quit)
         self.quit_action.triggered.connect(self.close)
@@ -521,6 +530,7 @@ class MainWindow(QMainWindow):
         self.edit_menu.addAction(self.copy_action)
         self.edit_menu.addSeparator()
         self.edit_menu.addAction(self.diagnostics_action)
+        self.edit_menu.addAction(self.resolve_test_action)
 
         settings_menu = self.menuBar().addMenu("Se&ttings")
         settings_menu.addAction(self.settings_action)
@@ -2010,6 +2020,48 @@ class MainWindow(QMainWindow):
 
     def dev_working_root_path(self):
         return dev_working_root()
+
+    def run_resolve_test(self) -> None:
+        """Run the real resolve and report what rez chose.
+
+        Synchronous, with a wait cursor: a cold resolve of a Maya package set
+        takes a while, and a diagnostic you started deliberately is one you are
+        willing to wait for. Everything else in this window is a prediction;
+        this is the one thing that measures.
+        """
+        from .. import diagnostics
+
+        project = self.current_project()
+        if project is None or not self.resolved_packages():
+            self.statusBar().showMessage(
+                "Pick a show and a tool first - there is nothing to resolve", 5000
+            )
+            return
+
+        self.statusBar().showMessage("Resolving with rez - this can take a minute...")
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        QApplication.processEvents()
+        try:
+            text = diagnostics.resolve_report(self)
+        finally:
+            QApplication.restoreOverrideCursor()
+        self.statusBar().clearMessage()
+
+        QApplication.clipboard().setText(text)
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Information)
+        box.setWindowTitle("What rez actually resolved")
+        box.setText("Copied to the clipboard.")
+        box.setInformativeText(
+            "\n".join(
+                line
+                for line in text.splitlines()
+                if line.strip().startswith(("***", ">>>"))
+            )
+            or "The resolve came back with nothing to flag."
+        )
+        box.setDetailedText(text)
+        box.exec()
 
     def show_diagnostics(self) -> None:
         """Everything that decides whether a package reaches the environment."""
