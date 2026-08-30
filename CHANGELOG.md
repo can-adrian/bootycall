@@ -10,6 +10,23 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.6.3
+
+- **Update Dev Installs and Launch says why it did nothing.** It was not dead —
+  it was finding nothing to update and reporting that as a five-second status
+  message before launching normally, which from the outside is exactly what a
+  broken menu item looks like. Four different situations produced it: the
+  section switched off, nothing in play, a dev working location that does not
+  exist or holds no packages, and — the likeliest — a working location whose
+  folder names do not match any installed dev package. Each is now named, with
+  the paths and both lists of names, and offers Launch Anyway rather than
+  launching as though the update had run.
+- **A three-pixel progress bar during the rebuild**, along the bottom edge, in
+  compact mode as well. Overlaid on the central widget rather than placed in the
+  layout, so showing it cannot resize a window that is sized to the pixel. It
+  steps *before* each build rather than after: a rez build is slow enough that a
+  bar which only moves on completion spends most of its life looking stuck.
+
 ## 0.6.2
 
 - **"Overridden" is now "outranked"**, matching the word the rows already use.

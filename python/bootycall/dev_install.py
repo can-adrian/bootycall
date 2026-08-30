@@ -326,8 +326,65 @@ def stale_installs(
     return stale
 
 
+def update_blocker(
+    enabled: Sequence[LocalPackage],
+    section_on: bool,
+    working_root: Path | str | None = None,
+) -> str:
+    """Why an update cannot do anything, or "" if it can.
+
+    "Nothing to update" and "nothing is set up to be updated" look identical
+    from the outside -- both leave the packages exactly as they were -- and
+    telling them apart is the difference between a menu item that is working
+    and one that appears dead. The commonest cause by far is the working
+    location pointing somewhere the user's checkouts are not.
+    """
+    root = Path(working_root) if working_root is not None else dev_working_root()
+
+    if not section_on:
+        return (
+            "Installed Dev Packages is switched off, so nothing in it is in "
+            "play to update."
+        )
+    if not enabled:
+        return (
+            "No installed dev packages are in play - either none are installed, "
+            "or they are all unticked."
+        )
+    if not root.is_dir():
+        return (
+            "The dev working location does not exist:\n  %s\n\nThat is where "
+            "updates are built from. Set it in Settings if your checkouts live "
+            "somewhere else." % root
+        )
+
+    working = [p for p in list_working_packages(root) if p.is_package]
+    if not working:
+        return (
+            "Nothing in the dev working location is a rez package:\n  %s\n\n"
+            "Updates are built from there, so there is nothing to build."
+            % root
+        )
+
+    shared = {p.name for p in enabled} & {p.name for p in working}
+    if not shared:
+        return (
+            "None of your installed dev packages have a working copy in:\n"
+            "  %s\n\nInstalled: %s\nWorking copies: %s\n\nUpdates are "
+            "matched by directory name, so nothing here can be rebuilt."
+            % (
+                root,
+                ", ".join(sorted({p.name for p in enabled})) or "none",
+                ", ".join(sorted(p.name for p in working)) or "none",
+            )
+        )
+    return ""
+
+
 def update_installs(
-    stale: Sequence[StaleInstall], dest_root: Path | str
+    stale: Sequence[StaleInstall],
+    dest_root: Path | str,
+    on_progress=None,
 ) -> tuple[list[str], list[str]]:
     """Re-install each stale package. Returns ``(updated, failures)``.
 
@@ -337,12 +394,19 @@ def update_installs(
     """
     updated: list[str] = []
     failures: list[str] = []
-    for item in stale:
+    for index, item in enumerate(stale):
+        if on_progress is not None:
+            # Before the build, not after: a rez build is slow enough that a
+            # bar which only moves on completion spends most of its life
+            # looking stuck.
+            on_progress(index, len(stale), item.name)
         ok, output = install(item.source, dest_root)
         if ok:
             updated.append(item.name)
         else:
             failures.append("%s: %s" % (item.name, _last_line(output)))
+    if on_progress is not None:
+        on_progress(len(stale), len(stale), "")
     return updated, failures
 
 

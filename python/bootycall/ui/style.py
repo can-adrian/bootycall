@@ -327,4 +327,12 @@ QToolButton#configRemoveButton:hover {
     color: #ffffff;
 }
 QToolButton#configRemoveButton:pressed { background: #8e4640; }
+
+/* The update bar: three pixels along the bottom edge, no text, no border.
+   It is there to say "still going", and nothing else. */
+QProgressBar#microProgress {
+    background: transparent;
+    border: none;
+}
+QProgressBar#microProgress::chunk { background: #e0a23c; }
 """

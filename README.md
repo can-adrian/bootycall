@@ -314,7 +314,15 @@ Launching now uses what is installed, not what you have been editing.
 ```
 
 The failure it prevents is a silent one: you edit a package, launch, and spend
-twenty minutes wondering why your change isn't there. It only appears when
+twenty minutes wondering why your change isn't there.
+
+**Update Dev Installs and Launch** on Launch's right-click menu does the same on
+demand — and when it cannot do anything it says which of the four reasons
+applies: the section is switched off, nothing is in play, the working location
+does not exist or holds no packages, or its folder names match none of your
+installed dev packages. Updates are matched by directory name, so that last one
+is the common trap, and the message lists both sides. A three-pixel bar along
+the bottom edge shows the rebuild's progress, in compact mode too. It only appears when
 something is genuinely behind, so it stays a signal rather than another dialog to
 dismiss on autopilot — and **Update Dev Installs and Launch** on Launch's
 right-click menu does the same thing on demand.

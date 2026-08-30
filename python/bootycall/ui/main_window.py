@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QProgressBar,
     QSizePolicy,
     QToolButton,
     QVBoxLayout,
@@ -416,6 +417,16 @@ class MainWindow(QMainWindow):
         root.addLayout(footer)
 
         self.setCentralWidget(central)
+
+        # A three-pixel strip along the bottom edge, parented to the central
+        # widget rather than placed in the layout: in a layout it would grow
+        # the window when it appeared, and compact mode is sized to the pixel.
+        # Overlaid, it costs nothing until there is something to say.
+        self.progress = QProgressBar(central)
+        self.progress.setObjectName("microProgress")
+        self.progress.setTextVisible(False)
+        self.progress.setFixedHeight(3)
+        self.progress.hide()
         self.statusBar().showMessage(config.shows_root())
         self._apply_frame_stretch()
 
@@ -1103,6 +1114,38 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._fit_dcc_row()
+        self._place_progress()
+
+    def _place_progress(self) -> None:
+        central = self.centralWidget()
+        if central is None or not hasattr(self, "progress"):
+            return
+        self.progress.setGeometry(
+            0, central.height() - self.progress.height(), central.width(), 3
+        )
+        self.progress.raise_()
+
+    def _start_progress(self, total: int) -> None:
+        self.progress.setRange(0, max(1, total))
+        self.progress.setValue(0)
+        self._place_progress()
+        self.progress.show()
+        QApplication.processEvents()
+
+    def _step_progress(self, done: int, total: int, name: str) -> None:
+        self.progress.setRange(0, max(1, total))
+        self.progress.setValue(done)
+        if name and not self._compact:
+            self.statusBar().showMessage(
+                "Rebuilding %s  (%d of %d)" % (name, done + 1, total)
+            )
+        # A synchronous rez build blocks the loop; without this the bar is
+        # painted once at the start and once at the end, which is the same as
+        # not having one.
+        QApplication.processEvents()
+
+    def _end_progress(self) -> None:
+        self.progress.hide()
 
     def _equalise_tiles(self) -> None:
         """Give every tile in the row the same size, set by the widest of them.
@@ -2544,10 +2587,13 @@ class MainWindow(QMainWindow):
             "Rebuilding %d dev package%s..."
             % (len(stale), "" if len(stale) == 1 else "s")
         )
-        QApplication.processEvents()
+        self._start_progress(len(stale))
         try:
-            updated, failures = dev_install.update_installs(stale, dev_root())
+            updated, failures = dev_install.update_installs(
+                stale, dev_root(), on_progress=self._step_progress
+            )
         finally:
+            self._end_progress()
             QApplication.restoreOverrideCursor()
 
         self.refresh_package_lists()
@@ -2615,10 +2661,36 @@ class MainWindow(QMainWindow):
         if project is None or tool is None:
             return
 
+        blocker = dev_install.update_blocker(
+            self.enabled_dev_packages(),
+            self.dev_frame.is_checked(),
+            dev_working_root(),
+        )
+        if blocker:
+            # You asked for this explicitly, so "nothing happened" is not an
+            # answer. Every one of these reasons used to end as a five-second
+            # status message followed by an ordinary launch, which is
+            # indistinguishable from a menu item that does not work.
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Warning)
+            box.setWindowTitle("Nothing to update")
+            box.setText("Dev installs could not be updated.")
+            box.setInformativeText(blocker)
+            launch = box.addButton("Launch Anyway", QMessageBox.DestructiveRole)
+            box.addButton(QMessageBox.Cancel)
+            box.setDefaultButton(launch)
+            box.exec()
+            if box.clickedButton() is not launch:
+                return
+            self._on_launch(checked_dev=True)
+            return
+
         stale = self.stale_dev_installs()
         if not stale:
             self.statusBar().showMessage(
-                "Every dev package in play is up to date", 5000
+                "Every dev package in play is already up to date with %s"
+                % dev_working_root(),
+                8000,
             )
         elif not self._update_dev_installs(stale):
             # Deliberately does not fall through to a launch: that would look

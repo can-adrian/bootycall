@@ -2587,6 +2587,111 @@ check(
     % (window.dev_frame.toggle_button.toolTip(), window.dev_path_label.text()),
 )
 
+print("\nupdate dev installs says why it can do nothing")
+_dvi = Path(tempfile.mkdtemp(prefix="bootycall-updatecheck-"))
+from bootycall.dev_install import update_blocker as _blocker  # noqa: E402
+from bootycall.local_packages import LocalPackage as _LP  # noqa: E402
+
+_installed = [_LP(name="rig_utils", version="1.0.0", path=_dvi / "x")]
+check(
+    "a switched-off section is named as the reason",
+    "switched off" in _blocker(_installed, False, _dvi),
+    _blocker(_installed, False, _dvi),
+)
+check(
+    "so is having nothing in play",
+    "none are installed" in _blocker([], True, _dvi),
+    _blocker([], True, _dvi),
+)
+check(
+    "a working location that is not there is named, with the path",
+    "does not exist" in _blocker(_installed, True, _dvi / "nope")
+    and str(_dvi / "nope") in _blocker(_installed, True, _dvi / "nope"),
+    _blocker(_installed, True, _dvi / "nope"),
+)
+check(
+    "an empty working location too",
+    "is a rez package" in _blocker(_installed, True, _dvi),
+    _blocker(_installed, True, _dvi),
+)
+
+(_dvi / "something_else").mkdir()
+(_dvi / "something_else" / "package.py").write_text("name = 'something_else'\n")
+_mismatch = _blocker(_installed, True, _dvi)
+check(
+    "and a working location with no matching names explains the mismatch",
+    "matched by directory name" in _mismatch,
+    _mismatch,
+)
+check(
+    "listing both sides so the mismatch is obvious",
+    "rig_utils" in _mismatch and "something_else" in _mismatch,
+    _mismatch,
+)
+
+(_dvi / "rig_utils").mkdir()
+(_dvi / "rig_utils" / "package.py").write_text("name = 'rig_utils'\n")
+check(
+    "and nothing at all to say once the names line up",
+    _blocker(_installed, True, _dvi) == "",
+    _blocker(_installed, True, _dvi),
+)
+
+print("\na minimalist progress bar for the rebuild")
+check("hidden when idle", not window.progress.isVisible())
+check("three pixels tall", window.progress.height() == 3, str(window.progress.height()))
+check(
+    "and overlaid, so showing it cannot resize the window",
+    window.progress.parent() is window.centralWidget(),
+)
+
+_before = (window.width(), window.height())
+window._start_progress(3)
+QApplication.processEvents()
+check("shown while working", window.progress.isVisible())
+check(
+    "the window did not move or grow to make room",
+    (window.width(), window.height()) == _before,
+    "%s -> %s" % (_before, (window.width(), window.height())),
+)
+check(
+    "pinned to the bottom edge",
+    window.progress.y() + window.progress.height()
+    == window.centralWidget().height(),
+    "%d in %d" % (window.progress.y(), window.centralWidget().height()),
+)
+check(
+    "and the full width of it",
+    window.progress.width() == window.centralWidget().width(),
+)
+
+window._step_progress(1, 3, "rig_utils")
+QApplication.processEvents()
+check("it advances", window.progress.value() == 1, str(window.progress.value()))
+check("out of the right total", window.progress.maximum() == 3)
+window._end_progress()
+check("and goes away afterwards", not window.progress.isVisible())
+
+print("\nit works in compact, which is where it was asked for")
+window.set_compact(True)
+QApplication.processEvents()
+_compact_size = (window.width(), window.height())
+window._start_progress(2)
+QApplication.processEvents()
+check("visible while collapsed", window.progress.isVisible())
+check(
+    "and compact stays exactly the size it was",
+    (window.width(), window.height()) == _compact_size,
+    "%s -> %s" % (_compact_size, (window.width(), window.height())),
+)
+check(
+    "spanning the bottom of the compact window",
+    window.progress.width() == window.centralWidget().width(),
+)
+window._end_progress()
+window.set_compact(False)
+QApplication.processEvents()
+
 print("\nfavourites window")
 from bootycall.configs import SavedConfig as _SC  # noqa: E402
 from bootycall.ui.config_menu import ConfigMenuAction  # noqa: E402
