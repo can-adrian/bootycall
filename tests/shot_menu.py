@@ -12,6 +12,12 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("BOOTYCALL_SHOWS_ROOT", "/tmp/ice/shows")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import fixture  # noqa: E402
+
+fixture.ensure()
+
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 

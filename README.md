@@ -49,6 +49,9 @@ Seven suites, no framework: each is a plain script that prints `ok` / `FAIL`
 lines and exits non-zero on failure. The UI ones run against Qt's `offscreen`
 platform and write screenshots to `shots/`, so they work over SSH and in CI.
 
+`tests/fixture.py` builds the sample studio under `/tmp/ice` that the suites
+run against, from scratch, on every run. Any suite can be run on its own.
+
 The tagline under the logo is drawn at random each launch from
 `ui/main_window.py` → `TAGLINES`.
 
@@ -907,6 +910,7 @@ the ones below, and are handy for pointing a session at a test tree:
 | `BOOTYCALL_HOLD_TERMINAL` | `error` (also `always`, `never`) |
 | `BOOTYCALL_SHOW_RESOLVE_INFO` | `1` |
 | `BOOTYCALL_SCRIPT_DIR` | `$TMPDIR`, else the platform default (`/tmp`) |
+| `BOOTYCALL_SHOW_ENV_VARS` | `ILP_SHOW:ILP_CONTEXT_SHOW:SHOW:BOOTYCALL_SHOW` |
 | `BOOTYCALL_LAUNCH_COMMAND` | `<detected terminal> bash -c {script}` |
 | `BOOTYCALL_TERMINAL_COMMAND` | `<detected terminal> bash -c {script}` |
 | `BOOTYCALL_CONFIG_FILE` | `$XDG_CONFIG_HOME/bootycall/configs.json` |
@@ -958,6 +962,7 @@ python/bootycall/
 tests/
   test_packaging.py      version agreement and rez payload checks
   sample_bootstrap.py    the file you sent, re-indented
+  fixture.py             builds the sample studio under /tmp/ice
   test_parser.py         32 parser + filter checks
   test_configs.py        52 store checks incl. corrupt files, reorder, rename
   test_local_packages.py local/dev root + override checks

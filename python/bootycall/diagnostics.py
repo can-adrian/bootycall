@@ -19,8 +19,10 @@ from pathlib import Path
 from typing import Sequence
 
 from . import __version__, config, launcher
+from .discovery import find_show_package
 from .local_packages import (
     LocalPackage,
+    env_reads,
     current_user,
     definition_fields,
     definition_mismatch,
@@ -204,6 +206,32 @@ def report(window) -> str:
         "  (nothing resolves out of here - it is where Install Package reads "
         "from)"
     )
+
+    lines.append(_heading("what the show's own package asks the environment for"))
+    lines.append(
+        "  BootyCall sets: %s" % ", ".join(config.SHOW_ENV_VARS)
+    )
+    show_package = find_show_package(project) if project is not None else None
+    if show_package is None:
+        lines.append("  no show package found, so nothing of its own runs")
+    else:
+        wanted = env_reads(show_package.path)
+        if not wanted:
+            lines.append("  %s reads nothing out of the environment" % show_package.name)
+        else:
+            set_here = set(config.SHOW_ENV_VARS)
+            for name in wanted:
+                mark = "   " if name in set_here or name in os.environ else "***"
+                where = (
+                    "set by BootyCall" if name in set_here
+                    else "already in your environment" if name in os.environ
+                    else "NOT SET - the resolve will fail with PackageCommandError"
+                )
+                lines.append("  %s %s (%s)" % (mark, name, where))
+            lines.append(
+                "  (a name marked *** goes in BOOTYCALL_SHOW_ENV_VARS, or in "
+                "Settings)"
+            )
 
     lines.append(_heading("what will be run"))
     if project is not None and dcc is not None:

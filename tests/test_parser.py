@@ -491,6 +491,56 @@ for _shell in ("sh", "dash", "bash"):
         (_out.stderr or _out.stdout)[:200],
     )
 
+print("\nlocal green, dev orange, links called out")
+_link_root = Path(tempfile.mkdtemp(prefix="bootycall-banner-"))
+(_link_root / "src/rig_utils_WIP/1.8.666").mkdir(parents=True)
+(_link_root / "local/dev/rig_utils").mkdir(parents=True)
+(_link_root / "local/dev/anim_tools/2.0.0").mkdir(parents=True)
+(_link_root / "local/base/6.56.1").mkdir(parents=True)
+os.symlink(
+    _link_root / "src/rig_utils_WIP/1.8.666",
+    _link_root / "local/dev/rig_utils/1.8.666",
+)
+_link_banner = launcher.launch_banner(
+    (("dev", str(_link_root / "local/dev")), ("local", str(_link_root / "local"))),
+)
+_link_env = {
+    "PATH": os.environ.get("PATH", ""),
+    "REZ_BASE_ROOT": str(_link_root / "local/base/6.56.1"),
+    "REZ_BASE_VERSION": "6.56.1",
+    "REZ_ANIM_TOOLS_ROOT": str(_link_root / "local/dev/anim_tools/2.0.0"),
+    "REZ_ANIM_TOOLS_VERSION": "2.0.0",
+    "REZ_RIG_UTILS_ROOT": str(_link_root / "local/dev/rig_utils/1.8.666"),
+    "REZ_RIG_UTILS_VERSION": "1.8.666",
+}
+for _shell in ("sh", "dash", "bash"):
+    if shutil.which(_shell) is None:
+        continue
+    _lines = subprocess.run(
+        [_shell, "-c", _link_banner], capture_output=True, text=True, env=_link_env
+    )
+    check(
+        "%s: the symlinked install says so, asked of the filesystem" % _shell,
+        "rig_utils-1.8.666  (dev)  (symlinked)" in _lines.stdout,
+        (_lines.stderr or _lines.stdout)[:300],
+    )
+    check(
+        "%s: and a real directory does not" % _shell,
+        "anim_tools-2.0.0  (dev)\n" in _lines.stdout,
+        _lines.stdout,
+    )
+check(
+    "dev is orange, so it does not read as another local package",
+    "_bcO=$(printf '\\033[38;5;208m')" in _link_banner
+    and "dev) _bc_c=$_bcO" in _link_banner,
+    _link_banner[:400],
+)
+check(
+    "local stays green, which is what rez already marks it",
+    "local) _bc_c=$_bcG" in _link_banner,
+    _link_banner[:400],
+)
+
 print("\nand it survives rez re-quoting the command")
 # rez does not run the argv it is handed. It writes the whole thing into a
 # rez-shell.sh of its own, inside double quotes, and runs that. Anything

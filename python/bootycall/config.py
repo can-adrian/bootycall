@@ -28,6 +28,34 @@ from typing import Sequence
 #: Root folder that contains one directory per show/project.
 SHOWS_ROOT = os.environ.get("BOOTYCALL_SHOWS_ROOT", "/ice/shows")
 
+#: Environment variables set to the show's name before the resolve.
+#:
+#: A show package's ``commands()`` runs during the resolve, and some of them
+#: read the show out of the environment on the assumption that the bootstrap
+#: put it there. BootyCall goes straight to rez, so anything the bootstrap
+#: would have exported has to be exported here instead -- and a show whose
+#: package reads a name that is missing fails the resolve outright with
+#: ``PackageCommandError``, naming the variable it wanted.
+#:
+#: That error message is the thing to read: whatever it names goes in this
+#: list. Setting a variable no package reads costs nothing, which is why the
+#: default is generous rather than minimal.
+#:
+#: Override with BOOTYCALL_SHOW_ENV_VARS (colon-separated).
+SHOW_ENV_VARS: Sequence[str] = tuple(
+    v
+    for v in os.environ.get(
+        "BOOTYCALL_SHOW_ENV_VARS",
+        "ILP_SHOW:ILP_CONTEXT_SHOW:SHOW:BOOTYCALL_SHOW",
+    ).split(":")
+    if v
+)
+
+
+def show_env(name: str) -> dict[str, str]:
+    """Every show-name variable, set to ``name``."""
+    return {var: name for var in SHOW_ENV_VARS}
+
 #: Template for the per-user local package root. ``{user}`` is substituted.
 LOCAL_ROOT_TEMPLATE = os.environ.get(
     "BOOTYCALL_LOCAL_PACKAGES_ROOT", "/ice/rez/packages/local/{user}"

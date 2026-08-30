@@ -10,6 +10,44 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.10.0
+
+Minor: what the resolve is handed changed, and so did what it reports.
+
+- **The show name goes into more than two variables.** A show package's
+  `commands()` runs *inside* the resolve, and some of them read the show out of
+  the environment expecting the bootstrap to have exported it. Going straight
+  to rez, we hadn't. `diner_bear_s3` reads `ILP_CONTEXT_SHOW` and died with
+  `PackageCommandError: 'ILP_CONTEXT_SHOW'` while every other show launched
+  fine. The default set is now
+  `ILP_SHOW:ILP_CONTEXT_SHOW:SHOW:BOOTYCALL_SHOW`, and
+  **`BOOTYCALL_SHOW_ENV_VARS`** sets it — whatever a `PackageCommandError`
+  names goes in that list.
+
+- **Diagnostics reads the show package and says what it wants.** A new section
+  lists every variable the definition asks the environment for — `os.environ[…]`,
+  `os.getenv`, rex's `env.FOO` — and marks the ones nothing sets with `***`.
+  Reads only; `env.FOO = …` and `env.PATH.prepend(…)` are writes and are not
+  listed. Next time a show fails and its neighbour doesn't, that section is the
+  answer rather than a week of guessing.
+
+- **Installing a dev package reloads the whole window**, not just the two
+  package lists. A new package changes which requests are outranked and
+  invalidates the cached resolve probe; refreshing only the lists left both
+  stale.
+
+- **Dev packages print orange, local ones green.** rez already marks its own
+  local path green, so green-on-green said nothing. Symlinked installs now say
+  `(symlinked)` — asked of the filesystem with `-L`, so a link made by hand
+  counts the same as one BootyCall made.
+
+- **`tests/fixture.py` builds the sample studio the suites run against.** It
+  never existed: `/tmp/ice` had been made by hand once and every run since
+  depended on it still being there. It passed on one machine and nowhere else,
+  and the day it was deleted six suites failed with an `IndexError` that said
+  nothing about why. It is code now, rebuilt from scratch on every run, and any
+  suite can be run on its own.
+
 ## 0.9.0
 
 Minor: the launch is a script on disk now, not a shell one-liner.

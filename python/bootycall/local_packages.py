@@ -274,6 +274,86 @@ def resolves_to(name: str, request: str, roots: Sequence[str]) -> Winner | None:
     return best
 
 
+def env_reads(path: Path | str) -> tuple[str, ...]:
+    """Environment variables a package definition reads, by static read.
+
+    A show package's ``commands()`` runs inside the resolve. If it reads a
+    variable nobody set, rez fails the whole resolve with
+    ``PackageCommandError`` and the variable's name -- and because the
+    bootstrap would have exported it, the package works everywhere except from
+    here. One show launches, the next does not, and nothing in the UI says why.
+
+    So: read the definition and list what it asks the environment for. Covers
+    ``os.environ["X"]``, ``environ.get("X")``, ``os.getenv("X")`` and rex's own
+    ``env.X`` / ``env["X"]``. Sorted, deduplicated, and empty when the file
+    cannot be read -- this is a hint for the diagnostics, not a gate on
+    anything.
+    """
+    definition = Path(path)
+    if definition.is_dir():
+        found_name = _definition_in(definition)
+        if not found_name:
+            return ()
+        definition = definition / found_name
+
+    try:
+        source = definition.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ()
+    if definition.suffix in (".yaml", ".yml"):
+        return ()
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return ()
+
+    names: set[str] = set()
+
+    # env.PATH.prepend(...) is a write dressed as an attribute chain, and
+    # env.FOO = ... is a plain write. Neither is the package asking the
+    # environment for anything, so both are skipped below.
+    chained = {
+        id(node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Attribute)
+    }
+
+    def literal(node: ast.AST) -> str:
+        return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else ""
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Subscript):
+            base = node.value
+            holder = (
+                base.attr if isinstance(base, ast.Attribute)
+                else base.id if isinstance(base, ast.Name)
+                else ""
+            )
+            if holder in ("environ", "env"):
+                names.add(literal(node.slice))
+        elif isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Attribute) and func.attr in ("get", "getenv"):
+                holder = (
+                    func.value.attr if isinstance(func.value, ast.Attribute)
+                    else func.value.id if isinstance(func.value, ast.Name)
+                    else ""
+                )
+                if holder in ("environ", "env", "os") and node.args:
+                    names.add(literal(node.args[0]))
+        elif (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "env"
+            and isinstance(node.ctx, ast.Load)
+            and id(node) not in chained
+        ):
+            # rex's env.FOO, read rather than written.
+            names.add(node.attr)
+
+    return tuple(sorted(n for n in names if n))
+
+
 def definition_fields(path: Path | str) -> dict[str, str]:
     """``name`` and ``version`` as the package definition itself declares them.
 

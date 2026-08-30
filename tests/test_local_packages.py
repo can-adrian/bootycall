@@ -8,12 +8,19 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import fixture  # noqa: E402
+
+fixture.ensure()
+
 
 os.environ["BOOTYCALL_LOCAL_PACKAGES_ROOT"] = "/tmp/ice/rez/packages/local/{user}"
 os.environ["BOOTYCALL_REZ_USER"] = "adrian"
 
 import importlib  # noqa: E402
 
+from bootycall import config  # noqa: E402
 from bootycall import local_packages as lp  # noqa: E402
 
 importlib.reload(lp)
@@ -416,6 +423,55 @@ else:
     check("raises LocalPackagesUnavailable", True, "(skipped: running as root)")
 finally:
     os.chmod(locked, 0o755)
+
+print("\nwhat a package definition asks the environment for")
+_env_dir = Path(tempfile.mkdtemp(prefix="bootycall-envreads-"))
+(_env_dir / "package.py").write_text(
+    'name = "show_diner_bear_s3"\n'
+    'version = "0.12.2"\n'
+    "\n"
+    "def commands():\n"
+    "    import os\n"
+    '    env.ILP_SHOW_ROOT = "/ice/shows/%s" % os.environ["ILP_CONTEXT_SHOW"]\n'
+    '    env.PATH.prepend("{root}/bin")\n'
+    "    if env.MAYA_VERSION:\n"
+    "        pass\n"
+    '    site = os.getenv("ILP_SITE")\n',
+    encoding="utf-8",
+)
+_reads = lp.env_reads(_env_dir)
+check(
+    "os.environ[...] found - this is the one that fails a resolve",
+    "ILP_CONTEXT_SHOW" in _reads,
+    str(_reads),
+)
+check("os.getenv found", "ILP_SITE" in _reads, str(_reads))
+check("rex's env.FOO found when it is read", "MAYA_VERSION" in _reads, str(_reads))
+check(
+    "env.FOO = ... is a write, not a read",
+    "ILP_SHOW_ROOT" not in _reads,
+    str(_reads),
+)
+check(
+    "and env.PATH.prepend(...) is a write too",
+    "PATH" not in _reads,
+    str(_reads),
+)
+check("a directory works as well as a file", lp.env_reads(_env_dir / "package.py") == _reads)
+check("an unreadable path is empty, not an error", lp.env_reads(_env_dir / "nope") == ())
+
+print("\nthe show name reaches the packages that read it")
+check(
+    "ILP_CONTEXT_SHOW is set by default - a show package that reads it and "
+    "finds nothing fails the whole resolve",
+    "ILP_CONTEXT_SHOW" in config.SHOW_ENV_VARS,
+    str(config.SHOW_ENV_VARS),
+)
+check(
+    "every name gets the show",
+    set(config.show_env("diner_bear_s3").values()) == {"diner_bear_s3"},
+    str(config.show_env("diner_bear_s3")),
+)
 
 print()
 if failures:

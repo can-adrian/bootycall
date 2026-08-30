@@ -172,7 +172,7 @@ def resolve_probe(
     whose columns move between versions.
     """
     argv = ["rez-env", *packages, "--", "printenv"]
-    overrides = {"ILP_SHOW": project.name, "BOOTYCALL_SHOW": project.name}
+    overrides = dict(config.show_env(project.name))
     paths, _note = filtered_packages_path(exclude_roots, include_roots)
     if paths:
         overrides["REZ_PACKAGES_PATH"] = os.pathsep.join(paths)
@@ -230,6 +230,12 @@ def resolved_for(probe: ResolveProbe, name: str) -> tuple[str, str]:
 #: Colour per note level, as a shell variable name.
 _LEVELS = {"ok": "_bcG", "warn": "_bcY", "error": "_bcR", "": "_bcD"}
 
+#: Colour per highlighted root label, as a shell variable name. rez already
+#: marks its own local path green, so local packages keep green and dev ones
+#: get orange -- they are the ones with no marking of their own, and the ones
+#: you most want to notice.
+_ROOT_COLOURS = {"dev": "_bcO", "local": "_bcG"}
+
 
 def _escape(text: str) -> str:
     """Text safe inside a double-quoted shell string."""
@@ -268,10 +274,14 @@ def launch_banner(
         "    _bcG=$(printf '\\033[32m')",
         "    _bcY=$(printf '\\033[33m')",
         "    _bcR=$(printf '\\033[31m')",
+        # 256-colour orange rather than yellow: the point is that a dev
+        # package is not a local one, and next to green at a glance yellow
+        # reads as "the same but brighter".
+        "    _bcO=$(printf '\\033[38;5;208m')",
         "    _bcD=$(printf '\\033[2m')",
         "    _bc0=$(printf '\\033[0m')",
         "else",
-        "    _bcB= _bcG= _bcY= _bcR= _bcD= _bc0=",
+        "    _bcB= _bcG= _bcY= _bcR= _bcO= _bcD= _bc0=",
         "fi",
         "",
         "printf '%s\\n' \"${_bcB}BootyCall${_bc0}${_bcD}"
@@ -302,9 +312,17 @@ def launch_banner(
         # nested inside the local one, and reversed every dev package would
         # be reported as local.
         tests = "\n".join(
-            '            if (index(p, r%d "/") == 1) { print n "  (" l%d ")"; continue }'
+            '            if (index(p, r%d "/") == 1) { print n, l%d, p; continue }'
             % (i, i)
             for i in range(len(roots))
+        )
+        # Colour per label, chosen in the shell rather than baked into awk's
+        # output, so the lines stay plain text when stdout is not a terminal.
+        cases = "\n".join(
+            "            %s) _bc_c=$%s ;;" % (shlex.quote(label), colour)
+            for label, colour in sorted(
+                {(label, _ROOT_COLOURS.get(label, "_bcG")) for label, _ in roots}
+            )
         )
         lines += [
             "",
@@ -323,11 +341,31 @@ def launch_banner(
             "            p = root[k]",
             tests,
             "        }",
-            "    }' | sort | sed 's/^/    /')",
+            "    }' | sort)",
             "",
             'if [ -n "$_bc_hits" ]; then',
-            "    printf '%s\\n%s\\n'"
-            ' "${_bcG}  your packages in this environment:" "$_bc_hits${_bc0}"',
+            "    printf '%s\\n'"
+            ' "${_bcG}  your packages in this environment:${_bc0}"',
+            # A pipeline, so this loop runs in a subshell -- fine, because it
+            # prints as it goes rather than accumulating anything the rest of
+            # the script needs.
+            "    printf '%s\\n' \"$_bc_hits\" |",
+            "    while read -r _bc_name _bc_label _bc_path; do",
+            "        _bc_c=$_bcG",
+            '        case "$_bc_label" in',
+            cases,
+            "        esac",
+            # Asked of the filesystem, not predicted from what BootyCall
+            # thinks it installed: a link someone made by hand counts too.
+            # The version directory is the link for an installed dev package,
+            # its parent for an unversioned one.
+            "        _bc_link=",
+            '        if [ -L "$_bc_path" ] || [ -L "${_bc_path%/*}" ]; then',
+            "            _bc_link='  (symlinked)'",
+            "        fi",
+            "        printf '%s\\n'"
+            ' "    ${_bc_c}${_bc_name}  (${_bc_label})${_bc_link}${_bc0}"',
+            "    done",
             "else",
             "    printf '%s\\n'"
             ' "${_bcR}  none of your local or dev packages are in this'
@@ -655,8 +693,12 @@ def _spawn(
         return None
 
     env = os.environ.copy()
-    env["ILP_SHOW"] = project.name
-    env["BOOTYCALL_SHOW"] = project.name
+    # A show package's commands() runs during the resolve and may read the show
+    # out of the environment, expecting the bootstrap to have put it there. We
+    # went straight to rez, so it has to come from here -- and a show whose
+    # package reads a name nobody set fails the whole resolve with
+    # PackageCommandError, naming the variable.
+    env.update(config.show_env(project.name))
 
     # Two reasons to rewrite the path. Switching off a package section means
     # its packages must not reach the resolve, and they are not in the request

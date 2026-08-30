@@ -1678,7 +1678,11 @@ class MainWindow(QMainWindow):
         if not dialog.installed:
             return
 
-        self.refresh_package_lists()
+        # Everything, not just the two package lists. A new package changes
+        # what the shadow scan finds, which requests it outranks, and what the
+        # cached resolve probe answered before it existed -- and a stale cache
+        # here is exactly the kind of thing that costs an afternoon.
+        self.reload_all()
         names = ", ".join(dict.fromkeys(dialog.installed))
         self.statusBar().showMessage("Installed %s" % names, 8000)
 

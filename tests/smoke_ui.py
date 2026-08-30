@@ -18,6 +18,11 @@ os.environ.setdefault("BOOTYCALL_REZ_USER", "adrian")
 os.environ.setdefault("BOOTYCALL_USER_PACKAGES_ROOT", "/tmp/ice/userpackages")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import fixture  # noqa: E402
+
+fixture.ensure()
 
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
@@ -3039,6 +3044,28 @@ window._rebuild_file_menu()
 check("store empty", len(window.store) == 0)
 check("placeholder back", "   Nothing saved yet" in menu_texts(), str(menu_texts()))
 check("no crash", True)
+
+print("\ninstalling a dev package reloads everything, not just the lists")
+_reloads = []
+_real_reload = window.reload_all
+window.reload_all = lambda *a, **k: (_reloads.append(1), _real_reload(*a, **k))[1]
+class _FakeInstallDialog:
+    def __init__(self, *a, **k):
+        self.installed = ["rig_utils"]
+    def exec(self):
+        return 1
+import bootycall.ui.main_window as _mw  # noqa: E402
+_real_dialog = _mw.InstallPackageDialog
+_mw.InstallPackageDialog = _FakeInstallDialog
+window.show_install_dialog()
+_mw.InstallPackageDialog = _real_dialog
+window.reload_all = _real_reload
+check(
+    "a new package invalidates the shadow scan and the resolve cache too, "
+    "so the whole window is rebuilt",
+    _reloads == [1],
+    str(_reloads),
+)
 
 print("\nstale setups fail loudly, not silently")
 window.store.add(SavedConfig("Gone show", "deleted_show", "nuke", "nuke16"))
