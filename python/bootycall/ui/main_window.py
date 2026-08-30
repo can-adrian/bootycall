@@ -371,7 +371,9 @@ class MainWindow(QMainWindow):
             self.dev_frame,
             self.dev_path_label,
             self.dev_list,
-        ) = self._build_package_section("Installed Dev Packages")
+        ) = self._build_package_section(
+            "Installed Dev Packages", expanded=True, show_path=False
+        )
         self.dev_list.itemChanged.connect(self._on_dev_item_changed)
         self.dev_frame.set_checked(self._use_dev)
         root.addWidget(self.dev_frame)
@@ -418,10 +420,12 @@ class MainWindow(QMainWindow):
         self._apply_frame_stretch()
 
     def _build_package_section(
-        self, title: str
+        self, title: str, expanded: bool = False, show_path: bool = True
     ) -> tuple[CollapsibleFrame, QLabel, QListWidget]:
-        """One collapsed package section: checkbox, header, root path, list."""
-        frame = CollapsibleFrame(title, expanded=False, checkable=True, checked=True)
+        """One package section: checkbox, header, optional root path, list."""
+        frame = CollapsibleFrame(
+            title, expanded=expanded, checkable=True, checked=True
+        )
         frame.toggled.connect(self._on_package_frame_toggled)
         frame.check_box.setToolTip(
             "Use these packages. Unchecked, their root is taken off the "
@@ -432,6 +436,11 @@ class MainWindow(QMainWindow):
         path_label = QLabel("")
         path_label.setObjectName("hint")
         path_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        # A section that stays open pays for that line every time you look at
+        # it, and the path does not change. Where it is hidden the same text
+        # goes on the header's tooltip, so nothing is lost -- it just stops
+        # taking a row of the window to say something you already know.
+        path_label.setVisible(show_path)
         frame.add_widget(path_label)
 
         listing = QListWidget()
@@ -1377,6 +1386,9 @@ class MainWindow(QMainWindow):
             # not see these packages at all.
             label += "\n(not in your rez packages path - BootyCall adds it)"
         path_label.setText(label)
+        # On the header too, so a section whose path line is hidden still has
+        # the root and the warning a hover away.
+        frame.toggle_button.setToolTip(label)
 
         error = ""
         try:
@@ -1801,28 +1813,39 @@ class MainWindow(QMainWindow):
                 frame.set_note("not used", "")
                 frame.set_alert("")
             elif packages:
-                # Two different facts, counted separately. "In use" is a build
-                # of yours that the resolve will actually get; "overridden" is
-                # one the resolve names and then takes from somewhere else.
-                # Reporting the second as the first is what sent Adrian
-                # looking for a broken install for a week.
+                # Three facts, and they are not the same one. "In use" is a
+                # build of yours the resolve will actually get. "Outranked" is
+                # one that could have been used but lost to a higher version
+                # elsewhere. "Unusable" is one that was never in the running,
+                # because its version cannot satisfy the request at all.
+                #
+                # The words match the ones on the rows -- a header that says
+                # "overridden" over a row that says "outranked by 1.9.0" makes
+                # the reader stop and work out whether they mean the same
+                # thing.
                 in_use = 0
-                overridden = 0
+                outranked = 0
+                unusable = 0
                 for name, shadow in overrides.items():
                     if shadow.blocked:
-                        overridden += 1
+                        unusable += 1
                         continue
                     winner = self._winner_for(name, shadow.request)
                     if winner is None or _winner_is_ours(winner, packages):
                         in_use += 1
                     else:
-                        overridden += 1
+                        outranked += 1
 
                 frame.set_note(
                     "%d in use" % in_use if in_use else "",
                     "warn" if in_use else "",
                 )
-                frame.set_alert("%d overridden" % overridden if overridden else "")
+                parts = []
+                if outranked:
+                    parts.append("%d outranked" % outranked)
+                if unusable:
+                    parts.append("%d unusable" % unusable)
+                frame.set_alert("  \u00b7  ".join(parts))
             else:
                 frame.set_alert("")
 

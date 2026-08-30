@@ -10,6 +10,22 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.6.2
+
+- **"Overridden" is now "outranked"**, matching the word the rows already use.
+  A header reading *2 overridden* above a row reading *outranked by 1.9.0* makes
+  you stop and work out whether they mean the same thing. And the two ways of
+  losing are counted apart, because they are not the same problem: *1 outranked*
+  (a higher version won) and *1 unusable* (the version could never satisfy the
+  request).
+- **Installed Dev Packages opens by default.** It is the section you watch while
+  working; the other two stay closed.
+- **Its path line is gone.** A section that stays open pays for that row every
+  time you look at the window, and the path does not change. The root and the
+  "not in your rez packages path" warning moved to the header's tooltip, so
+  nothing is lost. Local packages keep theirs, since that section is usually
+  shut.
+
 ## 0.6.1
 
 - **File → Reload** replaces *Reload shows* and reloads all of it: the shows

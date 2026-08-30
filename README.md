@@ -67,8 +67,8 @@ The tagline under the logo is drawn at random each launch from
    tiles are all one size, taken from the widest label present. Each tile carries its chosen variant's version in grey
    underneath.
 4. Shows the resolved package request for the selected variant, your local
-   packages and your dev packages, in three collapsible sections (all closed by
-   default).
+   packages and your dev packages, in three collapsible sections. Dev packages
+   open by default; the other two start shut.
 5. Launches it detached, so closing BootyCall doesn't take the DCC with it.
 
 ## The show field
@@ -119,13 +119,14 @@ and the show field's prompt is gone anyway once a show is pinned.
 
 ## The three package sections
 
-All closed on startup — the resolve alone is 30-odd lines you rarely need — but
-each header carries a badge so it still reports what's inside while shut:
+Installed Dev Packages opens on startup; the other two are shut, since the
+resolve alone is 30-odd lines you rarely need. Every header carries a badge, so
+a closed section still reports what is inside it:
 
 ```
   ▸ Resolved packages                    nuke - 30 packages   2 overridden locally
 ☑ ▸ Local packages                            4 packages      1 in use
-☑ ▸ Installed Dev Packages                    8 packages      1 in use  2 overridden
+☑ ▾ Installed Dev Packages                    8 packages      1 in use  2 outranked
 ```
 
 ### Switching a section off
@@ -150,12 +151,20 @@ contains what you switched off.
 Both switches persist. Only the *off* state is written, so a config file with
 neither key means both on.
 
-The two badges on the right count different things and are coloured apart.
-**In use** (amber) is a build of yours the resolve will actually get.
-**Overridden** (red) is one the resolve names and then takes from somewhere
-else — outranked by a higher version, or a version that cannot satisfy the
-request at all. Both can be true at once, which is why they are two badges
-rather than one label that changes colour.
+The badges on the right count different things and are coloured apart.
+**In use** (amber) is a build of yours the resolve will actually get. The red
+badge is one the resolve names and then takes from somewhere else, split by
+*why*: **outranked** (a higher version of the same name won) and **unusable**
+(the version could never satisfy the request). Several can be true at once,
+which is why they are separate badges rather than one label that changes
+colour — and they use the same words the rows do, so the header and the list
+cannot appear to disagree.
+
+**Installed Dev Packages opens by default** — it is the one you watch while
+working — and does not spend a row on its path, since a section that stays open
+pays for that line every time you look at it. The root and the *not in your rez
+packages path* warning are on the header's tooltip instead. Local packages keep
+their path line; that section is usually shut.
 
 Opening a section grows the window if it would otherwise squash the list;
 closing never shrinks it, since that would undo a size you chose.

@@ -85,6 +85,18 @@ check("lost+found excluded", "lost+found" not in names)
 check("plain file excluded", "README.txt" not in names)
 check("sorted case-insensitively", names == sorted(names, key=str.lower), str(names))
 check("no DCC buttons before a show is picked", not window._dcc_buttons)
+check(
+    "the dev section starts open, the other two closed",
+    window.dev_frame.is_expanded()
+    and not window.local_frame.is_expanded()
+    and not window.resolve_frame.is_expanded(),
+    "dev=%s local=%s resolve=%s"
+    % (
+        window.dev_frame.is_expanded(),
+        window.local_frame.is_expanded(),
+        window.resolve_frame.is_expanded(),
+    ),
+)
 check("launch disabled", not window.launch_button.isEnabled())
 shot(window, "01-empty")
 
@@ -2091,8 +2103,8 @@ check(
     window.local_frame.note.text(),
 )
 check(
-    "it is counted as overridden instead, in the red badge",
-    "overridden" in window.local_frame.alert.text(),
+    "it is counted as unusable instead, in the red badge",
+    window.local_frame.alert.text() == "1 unusable",
     window.local_frame.alert.text(),
 )
 _resolve_texts = [
@@ -2485,9 +2497,17 @@ check(
     window.dev_frame.note.text(),
 )
 check(
-    "the one that loses is overridden, separately and in red",
-    window.dev_frame.alert.text() == "1 overridden",
+    "the one that loses is outranked, separately and in red",
+    window.dev_frame.alert.text() == "1 outranked",
     window.dev_frame.alert.text(),
+)
+check(
+    "the header uses the same word the row does",
+    any(
+        "outranked" in window.dev_list.item(i).text()
+        for i in range(window.dev_list.count())
+    ),
+    str([window.dev_list.item(i).text() for i in range(window.dev_list.count())]),
 )
 check(
     "the alert badge is visible when it has something to say",
@@ -2544,6 +2564,28 @@ window.reload_projects()
 QApplication.processEvents()
 unpin_all()
 pin("batman_returns")
+
+print("\nthe dev section is the one you keep open")
+check("open on startup", window.dev_frame.is_expanded())
+check(
+    "and it does not spend a row on a path that never changes",
+    not window.dev_path_label.isVisible(),
+)
+check(
+    "the local one still shows its path",
+    window.local_path_label.isVisible(),
+)
+check(
+    "but the dev root is still a hover away on the header",
+    str(_lp.dev_root()) in window.dev_frame.toggle_button.toolTip(),
+    window.dev_frame.toggle_button.toolTip(),
+)
+check(
+    "saying exactly what the hidden line would have said",
+    window.dev_frame.toggle_button.toolTip() == window.dev_path_label.text(),
+    "%r vs %r"
+    % (window.dev_frame.toggle_button.toolTip(), window.dev_path_label.text()),
+)
 
 print("\nfavourites window")
 from bootycall.configs import SavedConfig as _SC  # noqa: E402
