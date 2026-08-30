@@ -88,6 +88,23 @@ class LocalPackage:
         """How this package would be written in a rez request."""
         return "%s-%s" % (self.name, self.version) if self.version else self.name
 
+    @property
+    def is_symlink(self) -> bool:
+        """Is this a link to a working copy rather than an installed build?"""
+        try:
+            return self.path.is_symlink()
+        except OSError:
+            return False
+
+    def link_target(self) -> str:
+        """Where the link points, or "" when it is a real directory."""
+        if not self.is_symlink:
+            return ""
+        try:
+            return str(self.path.resolve())
+        except OSError:
+            return "<broken link>"
+
     def __str__(self) -> str:
         return self.request
 
@@ -345,15 +362,19 @@ def delete_package(package: LocalPackage, root: Path | str) -> str:
     """Delete one package directory from disk. Returns "" or an error message.
 
     Guarded rather than trusting the caller: this removes a directory tree, and
-    the two cheap checks below are the difference between deleting a dev build
-    and deleting whatever it happened to point at.
+    the checks below are the difference between deleting a dev build and
+    deleting whatever it happened to point at.
 
-    * the target must live strictly **inside** the root it was listed from, so
-      a path that escaped by any route cannot be removed;
-    * a symlinked package is refused outright -- following it would delete the
-      shared location it points to, not the user's copy.
+    **A symlinked package has its link removed and nothing else.** That is the
+    whole point of installing one: the package here is a pointer, and the files
+    it points at are the working copy you have been editing. Following the link
+    would delete your source. Refusing outright -- which is what this used to do
+    -- was safe but useless, since Delete then silently did nothing to the one
+    kind of install you most often want to undo.
 
-    A version directory left as the only child of its package-name directory
+    For a real directory: it must live strictly **inside** the root it was
+    listed from, so a path that escaped by any route cannot be removed. A
+    version directory left as the only child of its package-name directory
     takes the empty parent with it, so removing your last ``nuke_utils`` build
     does not leave an empty ``nuke_utils/`` behind to look like a package.
     """
@@ -361,7 +382,20 @@ def delete_package(package: LocalPackage, root: Path | str) -> str:
     target = package.path
 
     if target.is_symlink():
-        return "%s is a symlink; delete it where it really lives" % target
+        # Checked without resolving: the *link* has to be inside the root, and
+        # resolving first would test the working copy's location instead --
+        # which is somewhere else entirely, and none of our business.
+        if root_path not in Path(os.path.abspath(target)).parents:
+            return "refusing to remove %s: the link is not inside %s" % (
+                target,
+                root_path,
+            )
+        try:
+            target.unlink()
+        except OSError as exc:
+            return "could not remove the link %s: %s" % (target, exc)
+        _prune_empty_parent(target, root_path)
+        return ""
 
     try:
         resolved = target.resolve()
@@ -379,15 +413,21 @@ def delete_package(package: LocalPackage, root: Path | str) -> str:
     except OSError as exc:
         return "could not delete %s: %s" % (resolved, exc)
 
-    parent = resolved.parent
-    if parent != root_path:
-        try:
-            if not any(parent.iterdir()):
-                parent.rmdir()
-        except OSError:
-            # An empty directory left behind is untidy, not a failure.
-            pass
+    _prune_empty_parent(resolved, root_path)
     return ""
+
+
+def _prune_empty_parent(removed: Path, root_path: Path) -> None:
+    """Take the package-name directory with it, if that was its last version."""
+    parent = Path(os.path.abspath(removed)).parent
+    if parent == root_path:
+        return
+    try:
+        if not any(parent.iterdir()):
+            parent.rmdir()
+    except OSError:
+        # An empty directory left behind is untidy, not a failure.
+        pass
 
 
 def request_name(request: str) -> str:

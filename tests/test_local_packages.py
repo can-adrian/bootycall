@@ -238,19 +238,41 @@ err = lp.delete_package(lp.LocalPackage(name="r", version="", path=sandbox), san
 check("the root itself is refused", "not inside" in err, err)
 check("root still there", sandbox.exists())
 
-print("\nsymlinked packages are refused, not followed")
+print("\ndeleting a symlinked package removes the link and nothing else")
 real = Path(tempfile.mkdtemp(prefix="bootycall-real-"))
 (real / "package.py").write_text("name = 'x'\n")
+(real / "a_days_work.py").write_text("# the whole point of not following the link\n")
 link = sandbox / "linked"
 try:
     link.symlink_to(real, target_is_directory=True)
 except OSError:
-    check("symlink refused", True, "(skipped: cannot create symlinks here)")
+    check("symlinks unavailable here", True, "(skipped)")
 else:
-    err = lp.delete_package(lp.LocalPackage(name="linked", version="", path=link), sandbox)
-    check("symlink refused", "symlink" in err, err)
-    check("the target it pointed at is untouched", (real / "package.py").exists())
-    link.unlink()
+    _linked = [p for p in lp.list_local_packages(sandbox) if p.name == "linked"][0]
+    check("it is listed as a link", _linked.is_symlink)
+    check("and knows where it points", _linked.link_target() == str(real.resolve()),
+          _linked.link_target())
+
+    err = lp.delete_package(_linked, sandbox)
+    check("deleting it works, where it used to be refused", err == "", err)
+    check("the link is gone", not link.is_symlink() and not link.exists())
+    check(
+        "and every file it pointed at is still there",
+        (real / "package.py").exists() and (real / "a_days_work.py").exists(),
+        str(sorted(x.name for x in real.iterdir())),
+    )
+
+    # A link that points somewhere outside the root is still only a link, but
+    # the link itself has to be inside the root to be removed.
+    stray_dir = Path(tempfile.mkdtemp(prefix="bootycall-stray-"))
+    stray = stray_dir / "elsewhere"
+    stray.symlink_to(real, target_is_directory=True)
+    err = lp.delete_package(
+        lp.LocalPackage(name="elsewhere", version="", path=stray), sandbox
+    )
+    check("a link outside the root is refused", "not inside" in err, err)
+    check("and is still there", stray.is_symlink())
+    _shutil.rmtree(stray_dir, ignore_errors=True)
 
 print("\ndeleting something already gone reports rather than raising")
 ghost = lp.LocalPackage(name="ghost", version="1", path=sandbox / "ghost" / "1")

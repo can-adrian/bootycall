@@ -1468,17 +1468,29 @@ class MainWindow(QMainWindow):
             # decision and a row of checkboxes there would only be clutter.
             tickable = listing is self.dev_list
             for package in packages:
-                item = QListWidgetItem(package.request)
+                # Two spaces, not the six the override marks use: this belongs
+                # to the package's name, not to what the resolve makes of it,
+                # and must survive being remarked.
+                display = package.request + (
+                    "  (symlinked)" if package.is_symlink else ""
+                )
+                item = QListWidgetItem(display)
                 item.setData(_PACKAGE_NAME_ROLE, package.name)
                 item.setData(_PACKAGE_PATH_ROLE, str(package.path))
                 tip = "%s\n%s" % (package.path, package.definition)
+                if package.is_symlink:
+                    tip += (
+                        "\n\nA link to your working copy:\n  %s\nEdits there "
+                        "are live in the next resolve, and deleting this "
+                        "removes only the link." % package.link_target()
+                    )
 
                 # A package rez will skip is worth flagging before anything
                 # else this list says about it: an override that rez never
                 # sees is not an override, it is a puzzle.
                 problem = definition_mismatch(package)
                 if problem:
-                    item.setText("%s      %s" % (package.request, problem))
+                    item.setText("%s      %s" % (display, problem))
                     item.setForeground(QColor("#e06c75"))
                     tip += "\n\n%s" % problem
 
@@ -1706,18 +1718,35 @@ class MainWindow(QMainWindow):
     def _confirm_delete_packages(
         self, listing: QListWidget, packages: list[LocalPackage]
     ) -> None:
-        shown = [str(p.path) for p in packages[:8]]
+        shown = [
+            "%s%s" % (p.path, "   (link only)" if p.is_symlink else "")
+            for p in packages[:8]
+        ]
         if len(packages) > len(shown):
             shown.append("... and %d more" % (len(packages) - len(shown)))
+
+        links = [p for p in packages if p.is_symlink]
+        note = "This cannot be undone."
+        if links:
+            # The difference between removing a pointer and removing a day's
+            # work, and worth saying before the button is pressed rather than
+            # after.
+            note = (
+                "%d of these %s a link to a working copy: only the link is "
+                "removed, and the files it points at are left alone.\n\n"
+                "This cannot be undone."
+                % (len(links), "is" if len(links) == 1 else "are")
+            )
 
         reply = QMessageBox.warning(
             self,
             "Delete from disk",
-            "Permanently delete %d package%s?\n\n%s\n\nThis cannot be undone."
+            "Delete %d package%s?\n\n%s\n\n%s"
             % (
                 len(packages),
                 "" if len(packages) == 1 else "s",
                 "\n".join(shown),
+                note,
             ),
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,  # destructive: never the default

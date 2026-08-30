@@ -10,6 +10,24 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.6.4
+
+- **Symlinked installs read `(symlinked)`**, with the working copy's path on the
+  tooltip. They behave differently from built ones in three ways — live edits, no
+  staleness, and a different delete — and nothing said which kind you were
+  looking at.
+- **Deleting a symlinked package removes the link and nothing else.** It used to
+  refuse outright, which was safe and useless: Delete silently did nothing to
+  the one kind of install you most often want to undo. The link's *own* path is
+  checked against the root without resolving it, so the working copy's location
+  is never consulted, and the confirmation says how many of the selection are
+  links before you press the button.
+- **Tooltips are readable.** There was no `QToolTip` rule, so tooltips took
+  their text colour from the general `QWidget` rule and their background from
+  the platform's pale tooltip palette — light text on a light ground. Every
+  tooltip in the app was affected, which is most of the explanations BootyCall
+  has been adding for the last several versions.
+
 ## 0.6.3
 
 - **Update Dev Installs and Launch says why it did nothing.** It was not dead —

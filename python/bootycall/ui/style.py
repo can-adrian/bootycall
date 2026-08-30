@@ -1,6 +1,16 @@
 """Dark stylesheet, sized for a facility workstation."""
 
 STYLESHEET = """
+/* Without an explicit rule a tooltip takes its *text* colour from the QWidget
+   rule below and its background from the platform's tooltip palette, which is
+   pale -- so the light text lands on a light ground and cannot be read. */
+QToolTip {
+    background: #17293c;
+    color: #e4e8ee;
+    border: 1px solid #3d6187;
+    padding: 4px 6px;
+}
+
 QWidget {
     background: #0c1927;
     color: #d7dae0;

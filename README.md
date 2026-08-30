@@ -383,6 +383,13 @@ Both lists refresh on startup, on F5, and every time you open a section — it's
 one `scandir`, so they're never stale. A missing root is not an error; most
 people have never made a package in one, and the section just says so.
 
+### Built or linked
+
+A symlinked install reads `(symlinked)` beside its name, with the working copy's
+path on the tooltip. The distinction matters in three places: edits to a linked
+package are live in the next resolve, a linked package can never be stale, and
+deleting one removes the link while leaving the working copy alone.
+
 ### Deleting a package
 
 Right-click a row in either list for **Browse folder**, **Copy path** and

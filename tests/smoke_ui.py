@@ -2692,6 +2692,77 @@ window._end_progress()
 window.set_compact(False)
 QApplication.processEvents()
 
+print("\nsymlinked installs are labelled as such")
+_sym = Path(tempfile.mkdtemp(prefix="bootycall-symui-"))
+_sym_src = _sym / "working" / "rig_utils"
+_sym_src.mkdir(parents=True)
+(_sym_src / "package.py").write_text("name = 'rig_utils'\n")
+(_sym_src / "keep_me.py").write_text("# the working copy\n")
+_sym_dev = _sym / "local" / "dev"
+_sym_dev.mkdir(parents=True)
+(_sym_dev / "real_one").mkdir()
+(_sym_dev / "real_one" / "package.py").write_text("name = 'real_one'\n")
+try:
+    (_sym_dev / "rig_utils").symlink_to(_sym_src, target_is_directory=True)
+    _have_links = True
+except OSError:
+    _have_links = False
+
+if _have_links:
+    cfg_mod.set_path_overrides(
+        {"local_root": str(_sym / "local"), "dev_root": "{local}/dev"}
+    )
+    window.refresh_package_lists()
+    QApplication.processEvents()
+
+    _rows = {
+        window.dev_list.item(i).data(_NAME_ROLE): window.dev_list.item(i)
+        for i in range(window.dev_list.count())
+    }
+    check("both are listed", set(_rows) == {"rig_utils", "real_one"}, str(list(_rows)))
+    check(
+        "the linked one says so",
+        "(symlinked)" in _rows["rig_utils"].text(),
+        _rows["rig_utils"].text(),
+    )
+    check(
+        "the built one does not",
+        "(symlinked)" not in _rows["real_one"].text(),
+        _rows["real_one"].text(),
+    )
+    check(
+        "and the tooltip says where it points",
+        str(_sym_src) in _rows["rig_utils"].toolTip(),
+        _rows["rig_utils"].toolTip(),
+    )
+    check(
+        "and that deleting it only removes the link",
+        "only the link" in _rows["rig_utils"].toolTip(),
+        _rows["rig_utils"].toolTip(),
+    )
+
+    _pkgs = [p for p in window._dev_packages if p.name == "rig_utils"]
+    _errors = window.delete_packages(window.dev_list, _pkgs)
+    QApplication.processEvents()
+    check("deleting it works", _errors == [], str(_errors))
+    check("the link is gone", not (_sym_dev / "rig_utils").is_symlink())
+    check(
+        "and the working copy is untouched",
+        (_sym_src / "keep_me.py").is_file() and (_sym_src / "package.py").is_file(),
+        str(sorted(x.name for x in _sym_src.iterdir())),
+    )
+
+    cfg_mod.set_path_overrides({})
+    window.refresh_package_lists()
+    QApplication.processEvents()
+
+print("\ntooltips are readable, not light-on-light")
+_style = app.styleSheet()
+check("QToolTip is styled at all", "QToolTip" in _style)
+_tip = _style.split("QToolTip", 1)[1].split("}", 1)[0]
+check("with its own background", "background:" in _tip, _tip)
+check("and its own colour", "color:" in _tip, _tip)
+
 print("\nfavourites window")
 from bootycall.configs import SavedConfig as _SC  # noqa: E402
 from bootycall.ui.config_menu import ConfigMenuAction  # noqa: E402

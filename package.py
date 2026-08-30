@@ -1,6 +1,6 @@
 name = "bootycall"
 
-version = "0.6.3"
+version = "0.6.4"
 
 description = "An interface for managing rez environments and resolving packages."
 
