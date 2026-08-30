@@ -329,6 +329,35 @@ check(
 )
 config.SHOW_RESOLVE_INFO = _saved_info
 
+print("\nsaying which resolved packages are the user's own")
+_roots = (("dev", "/ice/local/adts/dev"), ("local", "/ice/local/adts"))
+_summary = launcher.mine_summary(_roots)
+check("it reads the resolved environment, not our predictions", "REZ_" in _summary and "_ROOT" in _summary, _summary[:80])
+check("both roots are matched", "/ice/local/adts/dev/*" in _summary and "/ice/local/adts/*" in _summary, _summary[:200])
+check(
+    "and it says so when none of them made it in",
+    "none of your local or dev packages" in _summary,
+    _summary[-120:],
+)
+check("no roots, no summary", launcher.mine_summary(()) == "")
+
+_argv = launcher.rez_argv(("a-1",), "maya", roots=_roots)
+check(
+    "the launch carries it",
+    "BootyCall: resolved from your own package roots" in _argv[-1],
+    _argv[-1][:80],
+)
+check(
+    "and still execs the application afterwards",
+    _argv[-1].rstrip().endswith("exec maya"),
+    _argv[-1][-40:],
+)
+check(
+    "the dev root is matched before the local one it sits inside",
+    _argv[-1].index("(dev)") < _argv[-1].index("(local)"),
+    "dev must win, or every dev package inside the local root reads 'local'",
+)
+
 _script = launcher.build_script(("a-1",), "maya")
 check(
     "the command is echoed first",

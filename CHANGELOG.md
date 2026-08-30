@@ -10,6 +10,33 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.6.0
+
+**The launch now says which resolved packages are yours.** Minor, because the
+launch argv changed again.
+
+rez marks packages from its own configured local packages path green and
+`(local)` in the context table. A dev root BootyCall puts on the path gets no
+such mark — rez has no reason to think it is special — so a correctly resolved
+dev build sat in a forty-line table looking exactly like the other thirty-nine,
+and was missed. That was the last of it: the package had been resolving
+correctly for some time.
+
+Under rez's table the launch now prints:
+
+```
+BootyCall: resolved from your own package roots:
+  rig_utils-1.8.666  (dev)
+  base-6.56.1  (local)
+```
+
+- Read from `REZ_<NAME>_ROOT` in the resolved environment, not from anything
+  BootyCall predicted — this line has to be true.
+- The dev root is matched before the local root it lives inside, or every dev
+  package would be labelled `(local)`.
+- **When nothing matches it says so**, which is the line that matters most:
+  *none of your local or dev packages are in this environment.*
+
 ## 0.5.5
 
 **Edit → Test resolve with rez** runs the actual resolve and reports what rez

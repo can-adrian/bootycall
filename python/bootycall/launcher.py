@@ -225,7 +225,55 @@ def resolved_for(probe: ResolveProbe, name: str) -> tuple[str, str]:
     return probe.version_of(_rez_env_key(name))
 
 
-def context_preamble(command: str) -> str:
+def mine_summary(roots: Sequence[tuple[str, str]]) -> str:
+    """Shell that lists which resolved packages came out of the user's roots.
+
+    rez already marks packages from its *configured* local packages path green
+    and ``(local)`` in the context table. A dev root BootyCall adds to the path
+    gets no such mark -- rez has no reason to think it is special -- so a dev
+    build sits in that table looking exactly like the other forty entries and
+    is trivially missed. This says which ones are yours, in BootyCall's own
+    words, right under rez's table.
+
+    Read from ``REZ_<NAME>_ROOT`` in the resolved environment rather than from
+    anything BootyCall predicted: this line has to be true, and the environment
+    is the only place that knows.
+
+    The line printed when *nothing* matched is the one that matters most. "None
+    of your packages are in this environment" is the answer to the question
+    that otherwise costs an afternoon.
+    """
+    if not roots:
+        return ""
+
+    # One line, because it is embedded in a shell string that is itself
+    # embedded in an echo. A here-string keeps the loop in the current shell so
+    # the accumulator survives it; a pipe would put it in a subshell and the
+    # results would vanish with it.
+    cases = "".join(
+        '%s/*) _bc_hits="$_bc_hits\n  $_bc_name  (%s)" ;; ' % (shlex.quote(root), label)
+        for label, root in roots
+    )
+    return (
+        '_bc_hits=""; '
+        "while read -r _bc_key _bc_path; do "
+        '[ -z "$_bc_key" ] && continue; '
+        '_bc_ver="REZ_${_bc_key}_VERSION"; '
+        "_bc_name=\"$(printf '%s' \"$_bc_key\" | tr 'A-Z' 'a-z')-${!_bc_ver}\"; "
+        'case "$_bc_path" in ' + cases + "esac; "
+        "done <<< \"$(env | sed -n "
+        "'s/^REZ_\\([A-Z0-9_]*\\)_ROOT=\\(.*\\)$/\\1 \\2/p' | sort)\"; "
+        'if [ -n "$_bc_hits" ]; then '
+        'printf \"BootyCall: resolved from your own package roots:%b\\n\" '
+        '"$_bc_hits"; '
+        "else "
+        'printf \"BootyCall: none of your local or dev packages are in this '
+        'environment.\\n\"; '
+        "fi; echo"
+    )
+
+
+def context_preamble(command: str, roots: Sequence[tuple[str, str]] = ()) -> str:
     """Print the resolved context, then become the application.
 
     ``exec`` on purpose: the shell replaces itself with the DCC rather than
@@ -235,12 +283,22 @@ def context_preamble(command: str) -> str:
     ``rez-context`` prints the same table rez shows when you enter an
     interactive resolved shell -- requested packages, resolved packages, the
     lot -- and colours it when stdout is a terminal, which here it is.
+    :func:`mine_summary` then says which of those forty-odd lines are yours,
+    which rez cannot know.
     """
-    return "rez-context 2>/dev/null; echo; exec %s" % shlex.quote(command)
+    parts = ["rez-context 2>/dev/null", "echo"]
+    summary = mine_summary(roots)
+    if summary:
+        parts.append(summary)
+    parts.append("exec %s" % shlex.quote(command))
+    return "; ".join(parts)
 
 
 def rez_argv(
-    packages: Sequence[str], command: str = "", show_info: bool | None = None
+    packages: Sequence[str],
+    command: str = "",
+    show_info: bool | None = None,
+    roots: Sequence[tuple[str, str]] = (),
 ) -> list[str]:
     """The rez invocation itself, without a terminal around it.
 
@@ -256,13 +314,17 @@ def rez_argv(
     if show_info is None:
         show_info = config.show_resolve_info()
     if show_info:
-        argv += ["--", "bash", "-c", context_preamble(command)]
+        argv += ["--", "bash", "-c", context_preamble(command, roots)]
     else:
         argv += ["--", command]
     return argv
 
 
-def build_script(packages: Sequence[str], command: str = "") -> str:
+def build_script(
+    packages: Sequence[str],
+    command: str = "",
+    roots: Sequence[tuple[str, str]] = (),
+) -> str:
     """A shell one-liner that echoes the command, runs it, and holds on failure.
 
     The window closing on failure is the single most annoying way for a
@@ -273,7 +335,9 @@ def build_script(packages: Sequence[str], command: str = "") -> str:
     Echoing the command is worth the line on its own -- when a resolve fails,
     the first question is always what was actually asked for.
     """
-    inner = " ".join(shlex.quote(part) for part in rez_argv(packages, command))
+    inner = " ".join(
+        shlex.quote(part) for part in rez_argv(packages, command, roots=roots)
+    )
     hold = config.HOLD_TERMINAL
 
     if hold == "never":
@@ -290,7 +354,10 @@ def build_script(packages: Sequence[str], command: str = "") -> str:
 
 
 def expand(
-    template: Sequence[str], packages: Sequence[str], command: str = ""
+    template: Sequence[str],
+    packages: Sequence[str],
+    command: str = "",
+    roots: Sequence[tuple[str, str]] = (),
 ) -> list[str]:
     """Build an argv from ``template``.
 
@@ -302,7 +369,7 @@ def expand(
     argv: list[str] = []
     for part in template:
         if "{script}" in part:
-            argv.append(build_script(packages, command))
+            argv.append(build_script(packages, command, roots))
         elif "{packages}" in part:
             argv.extend(packages)
         elif "{command}" in part:
@@ -318,9 +385,13 @@ def expand(
     return argv
 
 
-def build_command(packages: Sequence[str], command: str) -> list[str]:
+def build_command(
+    packages: Sequence[str],
+    command: str,
+    roots: Sequence[tuple[str, str]] = (),
+) -> list[str]:
     """Argv that resolves ``packages`` and runs ``command`` in a terminal."""
-    return expand(config.LAUNCH_COMMAND, packages, command)
+    return expand(config.LAUNCH_COMMAND, packages, command, roots)
 
 
 def build_terminal_command(packages: Sequence[str]) -> list[str]:
@@ -335,9 +406,14 @@ def _preview(project: Project, argv: Sequence[str]) -> str:
     )
 
 
-def command_preview(project: Project, packages: Sequence[str], command: str) -> str:
+def command_preview(
+    project: Project,
+    packages: Sequence[str],
+    command: str,
+    roots: Sequence[tuple[str, str]] = (),
+) -> str:
     """A copy-pasteable representation of what :func:`launch` will run."""
-    return _preview(project, build_command(packages, command))
+    return _preview(project, build_command(packages, command, roots))
 
 
 def terminal_preview(project: Project, packages: Sequence[str]) -> str:
@@ -352,11 +428,12 @@ def launch(
     exclude_roots: Sequence[str] = (),
     include_roots: Sequence[str] = (),
     dry_run: bool = False,
+    roots: Sequence[tuple[str, str]] = (),
 ) -> subprocess.Popen | None:
     """Resolve ``packages`` and start ``command``, detached."""
     return _spawn(
         project,
-        build_command(packages, command),
+        build_command(packages, command, roots),
         exclude_roots,
         include_roots,
         dry_run,

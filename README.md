@@ -454,6 +454,27 @@ rather than the `-e` that newer versions removed. If nothing is found it falls
 back to `xterm`, so the failure names a program that's missing rather than dying
 somewhere less legible.
 
+### Which of them are yours
+
+rez marks packages from its *own configured* local packages path green and
+`(local)`. A dev root BootyCall adds gets no mark — rez has no reason to think
+it is special — so a dev build sits in a forty-line table looking like every
+other line. Under that table the launch prints its own summary:
+
+```
+BootyCall: resolved from your own package roots:
+  rig_utils-1.8.666  (dev)
+  base-6.56.1  (local)
+```
+
+Read out of `REZ_<NAME>_ROOT` in the resolved environment rather than from
+anything BootyCall predicted, because this line has to be true. The dev root is
+matched before the local root it sits inside, or everything in it would read
+`(local)`.
+
+The line printed when nothing matches is the one that earns the feature:
+*none of your local or dev packages are in this environment.*
+
 ### When it fails
 
 The command runs inside a shell that **echoes what it is about to run** and,

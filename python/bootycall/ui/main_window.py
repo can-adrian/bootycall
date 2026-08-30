@@ -1946,7 +1946,10 @@ class MainWindow(QMainWindow):
         if project is None or tool is None or self._active_dcc is None:
             return
         preview = launcher.command_preview(
-            project, self.resolved_packages(), self._active_dcc.run_command
+            project,
+            self.resolved_packages(),
+            self._active_dcc.run_command,
+            self.highlight_roots(),
         )
         QApplication.clipboard().setText(preview)
         self.statusBar().showMessage("Copied: %s" % preview, 5000)
@@ -2108,6 +2111,28 @@ class MainWindow(QMainWindow):
             roots.append(str(local_root()))
 
         return tuple(r for r in roots if Path(r).is_dir())
+
+    def highlight_roots(self) -> tuple[tuple[str, str], ...]:
+        """Roots whose packages the launch should call out by name.
+
+        rez marks its own configured local packages path green and ``(local)``
+        in the context table; a dev root BootyCall added gets no mark, so a dev
+        build sits in a forty-line table looking like everything else. These
+        are the roots the launch says are yours.
+
+        Most specific first, because the summary stops at the first match and
+        the dev root lives inside the local one -- ordered the other way round,
+        every dev package would be labelled "local".
+        """
+        roots: list[tuple[str, str]] = []
+        if self.dev_frame.is_checked():
+            view = self._dev_view_root()
+            if view is not None:
+                roots.append(("dev", str(view)))
+            roots.append(("dev", str(dev_root())))
+        if self.local_frame.is_checked():
+            roots.append(("local", str(local_root())))
+        return tuple(roots)
 
     def missing_from_rez_path(self) -> tuple[str, ...]:
         """Roots in play that rez's own configuration does not list.
@@ -2535,6 +2560,7 @@ class MainWindow(QMainWindow):
                 command,
                 self.excluded_roots(),
                 self.included_roots(),
+                roots=self.highlight_roots(),
             )
         except OSError as exc:
             QMessageBox.critical(
