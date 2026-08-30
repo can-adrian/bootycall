@@ -110,6 +110,22 @@ check("a missing build tool is a message, not a crash", not missing)
 check("naming what could not be run", "could not run" in message, message)
 config.DEV_INSTALL_COMMAND = saved_command
 
+print("\na build that exits clean but installs nothing")
+config.DEV_INSTALL_COMMAND = ("bash", "-c", "echo 'installed to /somewhere/else'; exit 0")
+lied, message = dev_install.install(WORKING / "nuke_utils", ROOT / "empty_dest")
+check("exit zero is not taken as evidence", not lied)
+check(
+    "and the message says where it looked",
+    "nothing appeared at" in message and "nuke_utils" in message,
+    message,
+)
+check(
+    "keeping the build's own output, which usually says where it went",
+    "installed to /somewhere/else" in message,
+    message,
+)
+config.DEV_INSTALL_COMMAND = saved_command
+
 print("\nsymlinking")
 ok, message = dev_install.symlink(WORKING / "anim_tools", INSTALLED)
 check("linked", ok, message)

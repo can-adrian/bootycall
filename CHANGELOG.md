@@ -10,6 +10,20 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.5.2
+
+- **Background is `#0c1927`.** The whole surface ladder scaled proportionally, so
+  the hue is unchanged and only the depth moved.
+- **An install that exits clean but puts nothing in the dev root is a failure.**
+  Exit zero is the build's opinion, not evidence: a build system that ignores
+  the prefix and installs to rez's configured local packages path exits happily,
+  and BootyCall was reporting that as "Installed". It now checks the package
+  actually arrived and, when it has not, says where it looked and keeps the
+  build's output, which usually names where it really went.
+- **The reason a build failed is in the dialog, not behind Show Details.** A
+  dialog that says "it failed, click to find out why" is a dialog that gets
+  dismissed.
+
 ## 0.5.1
 
 - **Edit → Diagnostics** puts everything that decides whether a package reaches

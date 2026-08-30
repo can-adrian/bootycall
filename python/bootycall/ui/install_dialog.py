@@ -221,9 +221,13 @@ class InstallPackageDialog(QDialog):
         box.setIcon(QMessageBox.Warning)
         box.setWindowTitle("Could not install %s" % name)
         box.setText("%s was not installed." % name)
+        # The reason goes in the visible part, not behind Show Details. A
+        # dialog that says "it failed, click here to find out why" is a dialog
+        # that gets dismissed.
+        tail = [line for line in (output or "").strip().splitlines() if line.strip()]
         box.setInformativeText(
-            "The build's own output is below - it says more about why than "
-            "anything BootyCall could add."
+            (tail[-1][:400] if tail else "No output.")
+            + "\n\nThe build's full output is below."
         )
         box.setDetailedText(output or "No output.")
         box.exec()

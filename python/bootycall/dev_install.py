@@ -148,6 +148,21 @@ def install(source: Path | str, dest_root: Path | str) -> tuple[bool, str]:
     output = (result.stdout or "") + (result.stderr or "")
     if result.returncode != 0:
         return False, output.strip() or "%s exited %d" % (argv[0], result.returncode)
+
+    # Exit zero is the build's opinion, not evidence. A build system that
+    # ignores the prefix, installs to the configured local packages path, or
+    # produces nothing at all still exits cleanly -- and the package is then
+    # missing from the one place BootyCall told you it would be, with a green
+    # message saying it worked. Check.
+    landed = dest / source_path.name
+    if not landed.is_dir():
+        return False, (
+            "%s exited successfully but nothing appeared at %s.\n\n"
+            "The build most likely installed somewhere else - rez installs to "
+            "its configured local packages path when the prefix is not "
+            "honoured. The output below should say where.\n\n%s"
+            % (argv[0], landed, output.strip())
+        )
     return True, output.strip()
 
 

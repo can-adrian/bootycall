@@ -2,7 +2,7 @@
 
 STYLESHEET = """
 QWidget {
-    background: #1f4060;
+    background: #0c1927;
     color: #d7dae0;
     font-family: "Inter", "Segoe UI", "Noto Sans", sans-serif;
     font-size: 13px;
@@ -46,8 +46,8 @@ QLabel#statusLabel[level="error"] { color: #e06c75; }
 QLabel#statusLabel[level="ok"]    { color: #7fbf7f; }
 
 QFrame#showField {
-    background: #24486b;
-    border: 1px solid #35587c;
+    background: #0e1c2b;
+    border: 1px solid #152232;
     border-radius: 8px;
 }
 QFrame#showField[focused="true"] { border-color: #4a90d9; }
@@ -65,16 +65,16 @@ QLineEdit#showFieldEdit[state="ok"]  { color: #8fce8f; }
 QLineEdit#showFieldEdit[state="bad"] { color: #d99e9e; }
 
 QLineEdit#filterField {
-    background: #24486b;
-    border: 1px solid #35587c;
+    background: #0e1c2b;
+    border: 1px solid #152232;
     border-radius: 5px;
     padding: 5px 9px;
 }
 QLineEdit#filterField:focus { border-color: #4a90d9; }
 
 QListView {
-    background: #24486b;
-    border: 1px solid #35587c;
+    background: #0e1c2b;
+    border: 1px solid #152232;
     border-radius: 6px;
     outline: none;
     padding: 4px;
@@ -83,12 +83,12 @@ QListView::item {
     padding: 6px 8px;
     border-radius: 4px;
 }
-QListView::item:selected { background: #2f6098; color: #ffffff; }
-QListView::item:hover:!selected { background: #2b5075; }
+QListView::item:selected { background: #12263e; color: #ffffff; }
+QListView::item:hover:!selected { background: #111f30; }
 
 QComboBox {
-    background: #24486b;
-    border: 1px solid #35587c;
+    background: #0e1c2b;
+    border: 1px solid #152232;
     border-radius: 5px;
     padding: 6px 10px;
     min-width: 160px;
@@ -97,22 +97,22 @@ QComboBox:focus, QComboBox:hover { border-color: #4a90d9; }
 /* Left ::drop-down unstyled on purpose: styling it suppresses Fusion's
    built-in arrow, and there is no image to replace it with. */
 QComboBox QAbstractItemView {
-    background: #24486b;
-    border: 1px solid #3d6187;
-    selection-background-color: #2f6098;
+    background: #0e1c2b;
+    border: 1px solid #182637;
+    selection-background-color: #12263e;
     outline: none;
 }
 
 QPushButton {
-    background: #2b5075;
-    border: 1px solid #3d6187;
+    background: #111f30;
+    border: 1px solid #182637;
     border-radius: 5px;
     padding: 8px 16px;
     color: #d7dae0;
 }
-QPushButton:hover:!disabled  { background: #365a80; border-color: #4d7093; }
-QPushButton:pressed:!disabled { background: #274b70; }
-QPushButton:disabled { color: #5a7a9b; border-color: #2c5177; }
+QPushButton:hover:!disabled  { background: #152334; border-color: #1e2c3c; }
+QPushButton:pressed:!disabled { background: #0f1d2e; }
+QPushButton:disabled { color: #23303f; border-color: #112030; }
 
 QPushButton#launchButton {
     background: #3f6fa8;
@@ -123,12 +123,12 @@ QPushButton#launchButton {
 }
 QPushButton#launchButton:hover:!disabled  { background: #4a80c0; }
 QPushButton#launchButton:pressed:!disabled { background: #365e8f; }
-QPushButton#launchButton:disabled { background: #2b5075; color: #5a7a9b; }
+QPushButton#launchButton:disabled { background: #111f30; color: #23303f; }
 QPushButton#launchButton[compact="true"] { padding: 8px 10px; }
 
 QToolButton#dccButton {
-    background: #24486b;
-    border: 1px solid #35587c;
+    background: #0e1c2b;
+    border: 1px solid #152232;
     border-radius: 8px;
     /* Extra bottom padding reserves the strip DccTile paints its variant line
        into; the icon and name sit above it. */
@@ -137,14 +137,14 @@ QToolButton#dccButton {
     font-size: 13px;
     font-weight: 600;
 }
-QToolButton#dccButton:hover   { background: #2b5075; border-color: #4d7093; }
-QToolButton#dccButton:checked { background: #2d5480; color: #ffffff; }
+QToolButton#dccButton:hover   { background: #111f30; border-color: #1e2c3c; }
+QToolButton#dccButton:checked { background: #112134; color: #ffffff; }
 
 /* Terminal and Favourites: same shape as a DCC tile, but dashed so it reads as
    an action rather than one of the show's software choices. */
 QToolButton#actionTile {
     background: transparent;
-    border: 1px dashed #3d6187;
+    border: 1px dashed #182637;
     border-radius: 8px;
     /* Matches the DCC tile, subtitle strip included, so the row lines up even
        though this tile has no variant line of its own. */
@@ -154,20 +154,20 @@ QToolButton#actionTile {
     font-weight: 600;
 }
 QToolButton#actionTile:hover:!disabled {
-    background: #24486b;
-    border-color: #5c7c9d;
+    background: #0e1c2b;
+    border-color: #243040;
     color: #ffffff;
 }
-QToolButton#actionTile:pressed:!disabled { background: #1a3652; }
-QToolButton#actionTile:disabled { color: #507296; border-color: #2c5177; }
+QToolButton#actionTile:pressed:!disabled { background: #0a1521; }
+QToolButton#actionTile:disabled { color: #1f2d3d; border-color: #112030; }
 
 QWidget#showChip {
-    background: #2b5075;
-    border: 1px solid #3d6187;
+    background: #111f30;
+    border: 1px solid #182637;
     /* Exactly half of chips.CHIP_HEIGHT, so the ends are true semicircles. */
     border-radius: 12px;
 }
-QWidget#showChip[hover="true"]    { border-color: #4d7093; }
+QWidget#showChip[hover="true"]    { border-color: #1e2c3c; }
 QWidget#showChip[selected="true"] { background: #2f4a68; border-color: #4a90d9; }
 QWidget#showChip:focus            { border-color: #4a90d9; }
 
@@ -189,24 +189,24 @@ QToolButton#showChipRemove:hover  { background: #a8564f; color: #ffffff; }
 QToolButton#showChipRemove:pressed { background: #8e4640; }
 
 QToolButton#compactButton {
-    background: #2b5075;
-    border: 1px solid #3d6187;
+    background: #111f30;
+    border: 1px solid #182637;
     border-radius: 5px;
 }
-QToolButton#compactButton:hover   { background: #365a80; border-color: #4d7093; }
-QToolButton#compactButton:pressed { background: #274b70; }
+QToolButton#compactButton:hover   { background: #152334; border-color: #1e2c3c; }
+QToolButton#compactButton:pressed { background: #0f1d2e; }
 
 QToolButton#moreButton {
-    background: #24486b;
-    border: 1px solid #35587c;
+    background: #0e1c2b;
+    border: 1px solid #152232;
     border-radius: 15px;
     color: #a6bad0;
     font-size: 15px;
     font-weight: 700;
     padding-bottom: 3px;
 }
-QToolButton#moreButton:hover   { background: #2b5075; border-color: #5c7c9d; color: #ffffff; }
-QToolButton#moreButton:pressed { background: #1a3652; }
+QToolButton#moreButton:hover   { background: #111f30; border-color: #243040; color: #ffffff; }
+QToolButton#moreButton:pressed { background: #0a1521; }
 
 QPushButton#dangerButton { color: #d99e9e; }
 QPushButton#dangerButton:hover:!disabled {
@@ -216,11 +216,11 @@ QPushButton#dangerButton:hover:!disabled {
 QListWidget#favoritesList::item { padding: 8px 10px; }
 
 QWidget#collapsibleHeader {
-    background: #1c3a58;
-    border: 1px solid #2c5177;
+    background: #0b1724;
+    border: 1px solid #112030;
     border-radius: 5px;
 }
-QWidget#collapsibleHeader:hover { border-color: #40658c; }
+QWidget#collapsibleHeader:hover { border-color: #192739; }
 
 QToolButton#collapsibleToggle {
     background: transparent;
@@ -250,7 +250,7 @@ QLabel#collapsibleNote[level="error"] { color: #e06c75; background: rgba(224, 10
 QWidget#collapsibleContent { background: transparent; }
 
 QGroupBox {
-    border: 1px solid #2c5177;
+    border: 1px solid #112030;
     border-radius: 6px;
     margin-top: 14px;
     padding-top: 10px;
@@ -264,40 +264,40 @@ QGroupBox::title {
     font-weight: 600;
 }
 
-QSplitter::handle { background: #2c5177; }
+QSplitter::handle { background: #112030; }
 QSplitter::handle:horizontal { width: 3px; }
 
 QScrollBar:vertical {
     background: transparent; width: 10px; margin: 2px;
 }
 QScrollBar::handle:vertical {
-    background: #3d6187; border-radius: 5px; min-height: 28px;
+    background: #182637; border-radius: 5px; min-height: 28px;
 }
-QScrollBar::handle:vertical:hover { background: #4d7093; }
+QScrollBar::handle:vertical:hover { background: #1e2c3c; }
 QScrollBar::add-line, QScrollBar::sub-line { height: 0; }
 QScrollBar::add-page, QScrollBar::sub-page { background: none; }
 
-QStatusBar { background: #17304a; color: #90a8c2; }
+QStatusBar { background: #09131e; color: #90a8c2; }
 QStatusBar::item { border: none; }
 
-QMenuBar { background: #17304a; }
+QMenuBar { background: #09131e; }
 QMenuBar::item { padding: 5px 10px; background: transparent; }
-QMenuBar::item:selected { background: #2b5075; }
+QMenuBar::item:selected { background: #111f30; }
 
 QMenu {
-    background: #24486b;
-    border: 1px solid #3d6187;
+    background: #0e1c2b;
+    border: 1px solid #182637;
     padding: 5px 0;
 }
 QMenu::item { padding: 6px 26px; }
-QMenu::item:selected { background: #2f6098; }
-QMenu::item:disabled { color: #6d8aa8; }
-QMenu::separator { height: 1px; background: #35587c; margin: 5px 8px; }
+QMenu::item:selected { background: #12263e; }
+QMenu::item:disabled { color: #2a3644; }
+QMenu::separator { height: 1px; background: #152232; margin: 5px 8px; }
 
 /* Saved-setup rows are QWidgetActions, so they need their own hover state --
    QMenu::item:selected does not reach inside a widget action. */
 QWidget#configItem { background: transparent; }
-QWidget#configItem[hover="true"] { background: #2f6098; }
+QWidget#configItem[hover="true"] { background: #12263e; }
 
 QLabel#configItemLabel { background: transparent; color: #d7dae0; }
 QLabel#configItemLabel[hover="true"] { color: #ffffff; }
