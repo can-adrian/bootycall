@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -335,7 +336,11 @@ print("\nsaying which resolved packages are the user's own")
 _roots = (("dev", "/ice/local/adts/dev"), ("local", "/ice/local/adts"))
 _summary = launcher.launch_banner(_roots)
 check("it reads the resolved environment, not our predictions", "REZ_" in _summary and "_ROOT" in _summary, _summary[:80])
-check("both roots are matched", "/ice/local/adts/dev/*" in _summary and "/ice/local/adts/*" in _summary, _summary[:200])
+check(
+    "both roots are handed to it as data, not pasted into the program",
+    "r0=/ice/local/adts/dev" in _summary and "r1=/ice/local/adts" in _summary,
+    _summary[:200],
+)
 check(
     "and it says so when none of them made it in",
     "none of your local or dev packages" in _summary,
@@ -385,9 +390,10 @@ check(
     _argv[-1][-40:],
 )
 check(
-    "the dev root is matched before the local one it sits inside",
-    _argv[-1].index("(dev)") < _argv[-1].index("(local)"),
-    "dev must win, or every dev package inside the local root reads 'local'",
+    "the dev root is tested before the local one it sits inside",
+    _argv[-1].index("l0=dev") < _argv[-1].index("l1=local"),
+    "dev must be tested first, or every dev package inside the local root "
+    "reports as local",
 )
 
 _script = launcher.build_script(("a-1",), "maya")
@@ -450,6 +456,31 @@ check(
     "base-6.56.1  (local)" in _ran.stdout,
     _ran.stdout,
 )
+
+# rez writes the command into a script of its own and runs it with whatever
+# shell the site configured, so the banner has to be portable shell rather
+# than bash-with-extras. The first attempt used ${!var} and a here-string and
+# failed on the exact Rocky boxes it was written for.
+for _shell in ("sh", "dash", "bash"):
+    if shutil.which(_shell) is None:
+        continue
+    _out = subprocess.run(
+        [_shell, "-c", launcher.launch_banner(_roots, (("warn", "off"),))],
+        capture_output=True,
+        text=True,
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "REZ_RIG_UTILS_ROOT": "/ice/local/adts/dev/rig_utils/1.8.666",
+            "REZ_RIG_UTILS_VERSION": "1.8.666",
+        },
+    )
+    check(
+        "it runs under %s with nothing on stderr" % _shell,
+        _out.returncode == 0
+        and not _out.stderr
+        and "rig_utils-1.8.666  (dev)" in _out.stdout,
+        (_out.stderr or _out.stdout)[:200],
+    )
 
 print("\nthe terminal gets the report too")
 _term = launcher.rez_argv((), "", roots=_roots)

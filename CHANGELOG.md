@@ -10,6 +10,23 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.8.1
+
+Patch: the report from 0.8.0 ran, then died on the shell it was written for.
+
+- **Dropped `${!var}` indirect expansion and the here-string.** Pairing each
+  `REZ_<NAME>_ROOT` with its `REZ_<NAME>_VERSION` was done in the shell, which
+  needed indirect expansion — bash before 5.1 rejects it outright with
+  `invalid indirect expansion`, which is what Rocky 9 said. One `awk` pass now
+  does the pairing *and* the root matching and prints finished lines; the shell
+  only decides whether there were any. No bashisms left: rez writes the command
+  into a script of its own and runs it with whatever shell the site configured,
+  so it has to be portable shell.
+- Roots reach `awk` as `-v` assignments rather than pasted into the program.
+- Tests run the banner under `sh`, `dash` and `bash` and require a clean exit
+  with an empty stderr in each. `bash -n` said the previous version parsed;
+  parsing was never the problem.
+
 ## 0.8.0
 
 Minor: the report from 0.7.0 never actually ran, and the shell never got one.

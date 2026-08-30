@@ -277,32 +277,59 @@ def launch_banner(
         )
 
     if roots:
-        cases = "".join(
-            # \\n, not a real newline: the separator is a two-character escape
-            # that the closing ``printf %b`` expands. A real newline here goes
-            # into the generated shell verbatim and splits the one-liner in
-            # half, which is how this banner spent a release never running.
-            '%s/*) _bc_hits="$_bc_hits\\n    $_bc_name  (%s)" ;; '
-            % (shlex.quote(root), label)
-            for label, root in roots
+        # One awk pass does the whole job: pair every REZ_<NAME>_ROOT with its
+        # REZ_<NAME>_VERSION, decide which of our roots the path sits under,
+        # and print the finished line. Then sort, then indent.
+        #
+        # The shell used to do the pairing and matching itself. It needed
+        # ${!var} indirect expansion, which bash before 5.1 rejects here with
+        # "invalid indirect expansion" -- so the report died on exactly the
+        # Rocky boxes it was written for -- and a here-string, which is a
+        # bashism in a script rez generates and runs with whatever shell the
+        # site configured. Neither is worth carrying: awk has string keys, and
+        # a pipeline runs anywhere.
+        #
+        # Slicing by $1 rather than splitting on "=" keeps values containing
+        # "=" intact, which paths occasionally do. Roots arrive as -v
+        # assignments so no path is ever pasted into the program text.
+        assigns = "".join(
+            " -v r%d=%s -v l%d=%s"
+            % (i, shlex.quote(root), i, shlex.quote(label))
+            for i, (label, root) in enumerate(roots)
+        )
+        # First match wins, so the caller's order decides: the dev root is
+        # nested inside the local one, and reversed every dev package would be
+        # reported as local.
+        tests = "".join(
+            'if (index(p, r%d "/") == 1) { print n "  (" l%d ")"; continue } '
+            % (i, i)
+            for i in range(len(roots))
+        )
+        program = (
+            "/^REZ_[A-Z0-9_]*_ROOT=/ "
+            "{ k = substr($1, 5, length($1) - 9); "
+            "r[k] = substr($0, length($1) + 2) } "
+            "/^REZ_[A-Z0-9_]*_VERSION=/ "
+            "{ k = substr($1, 5, length($1) - 12); "
+            "v[k] = substr($0, length($1) + 2) } "
+            "END { for (k in r) { "
+            'n = (v[k] != "" ? tolower(k) "-" v[k] : tolower(k)); '
+            "p = r[k]; " + tests + "} }"
         )
         parts.append(
-            '_bc_hits=""; '
-            "while read -r _bc_key _bc_path; do "
-            '[ -z "$_bc_key" ] && continue; '
-            '_bc_ver="REZ_${_bc_key}_VERSION"; '
-            "_bc_name=\"$(printf '%s' \"$_bc_key\" | tr 'A-Z' 'a-z')-${!_bc_ver}\"; "
-            'case "$_bc_path" in ' + cases + "esac; "
-            "done <<< \"$(env | sed -n "
-            "'s/^REZ_\\([A-Z0-9_]*\\)_ROOT=\\(.*\\)$/\\1 \\2/p' | sort)\""
+            "_bc_hits=$(env | awk -F="
+            + assigns
+            + " '"
+            + program
+            + "' | sort | sed 's/^/    /')"
         )
         parts.append(
             'if [ -n "$_bc_hits" ]; then '
-            'printf \"%b\\n\" \"${_bcG}  your packages in this '
-            'environment:$_bc_hits${_bc0}\"; '
+            "printf '%s\\n%s\\n' \"${_bcG}  your packages in this "
+            'environment:" "$_bc_hits${_bc0}"; '
             "else "
-            'printf \"%s\\n\" \"${_bcR}  none of your local or dev packages '
-            'are in this environment${_bc0}\"; '
+            "printf '%s\\n' \"${_bcR}  none of your local or dev packages "
+            'are in this environment${_bc0}"; '
             "fi"
         )
 
