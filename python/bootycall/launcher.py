@@ -105,7 +105,6 @@ def filtered_packages_path(
 
     unwanted = {os.path.normpath(p) for p in exclude}
     kept = [p for p in current if os.path.normpath(p) not in unwanted]
-    missed = exclude and len(kept) == len(current)
 
     known = {os.path.normpath(p) for p in kept}
     extra = [
@@ -113,12 +112,15 @@ def filtered_packages_path(
     ]
     paths = extra + kept
 
-    if missed:
-        # Nothing matched: the roots BootyCall shows are not the ones rez is
-        # actually reading, which is worth saying out loud.
-        return paths, (
-            "none of the excluded roots are on the rez packages path; "
-            "nothing was excluded"
+    # The only exclusion worth complaining about is one that did not take. A
+    # root that was never on the path in the first place needs no removing --
+    # the result is exactly what was asked for, and warning about it was noise
+    # that fired every time a package section was switched off at a site whose
+    # rez config does not list these roots. Which is most of them.
+    still_there = [p for p in paths if os.path.normpath(p) in unwanted]
+    if still_there:
+        return paths, "could not take %s off the packages path" % ", ".join(
+            still_there
         )
     return paths, ""
 

@@ -40,6 +40,28 @@ def set_always_on_top(window, enabled: bool) -> None:
         window.setGeometry(geometry)
 
 
+def set_frameless(window, enabled: bool) -> None:
+    """Take the title bar off ``window``, or put it back.
+
+    Clearing the title is not enough: with an empty ``_NET_WM_NAME`` most
+    window managers fall back to the application name and draw a title bar
+    around it anyway, so the compact launcher ends up wearing a truncated
+    "bootycall" it never asked for. Removing the decoration is the only way to
+    have no title bar text, rather than different title bar text.
+
+    The window stays managed -- this is a decoration hint, not an
+    override-redirect window -- so always-on-top and sticky still apply.
+    """
+    if bool(window.windowFlags() & Qt.FramelessWindowHint) == bool(enabled):
+        return
+    geometry = window.geometry()
+    visible = window.isVisible()
+    window.setWindowFlag(Qt.FramelessWindowHint, bool(enabled))
+    if visible:
+        window.show()
+        window.setGeometry(geometry)
+
+
 def is_x11() -> bool:
     return QGuiApplication.platformName() == "xcb"
 

@@ -10,6 +10,28 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.5.1
+
+- **Edit → Diagnostics** puts everything that decides whether a package reaches
+  the environment into one copyable report: what rez is configured to read, the
+  path this launch will actually use, which roots only BootyCall knows about,
+  every package found with the name and version its own definition declares, the
+  request that names it, and the command that would run.
+- **Packages rez would silently skip are flagged.** BootyCall lists by directory;
+  rez resolves by what the definition says. A folder called `nuke_utils` whose
+  `package.py` declares a different name, a `1.0.0` directory declaring `1.0.1`,
+  or a definition that does not parse — all in the list, in the right root, on
+  the path, and invisible to every resolve. Read with `ast`, never imported.
+- **The window is `#1f4060`.** The neutral greys moved to the same ladder in
+  navy; the amber, red, green and blue accents are untouched.
+- **Compact mode has no title bar.** Clearing the title was not enough — with an
+  empty name most window managers fall back to the application name and draw a
+  bar around it, so compact wore a truncated "bootycall". The decoration is gone
+  instead, and the window can be dragged from anywhere on it.
+- Switching a package section off no longer warns "nothing was excluded" when the
+  root was never on rez's path to begin with. That is the normal case now, and
+  the warning fired every time.
+
 ## 0.5.0
 
 Two bugs with the same symptom: a local or dev package shown as overriding the

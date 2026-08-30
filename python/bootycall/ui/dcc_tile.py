@@ -68,7 +68,7 @@ class DccTile(QToolButton):
         font.setPointSizeF(max(6.5, self.font().pointSizeF() - 1.5))
         font.setBold(False)
         painter.setFont(font)
-        painter.setPen(QColor("#8a919c" if self.isEnabled() else "#4d525a"))
+        painter.setPen(QColor("#a0b6cd" if self.isEnabled() else "#507296"))
 
         area = QRect(
             4,

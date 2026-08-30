@@ -20,6 +20,7 @@ machine and nowhere else".
 
 from __future__ import annotations
 
+import ast
 import getpass
 import os
 import re
@@ -194,6 +195,90 @@ def list_local_packages(
         group.sort(key=lambda p: version_key(p.version), reverse=True)
         regrouped.extend(group)
     return regrouped
+
+
+def definition_fields(path: Path | str) -> dict[str, str]:
+    """``name`` and ``version`` as the package definition itself declares them.
+
+    Read with :mod:`ast`, never imported -- the same rule the bootstrap reader
+    follows, and for the same reason.
+
+    This matters because BootyCall lists packages by *directory* and rez
+    resolves them by what the definition *says*. When the two disagree -- a
+    folder called ``nuke_utils`` whose package.py declares ``nuke_utils_dev``,
+    or a ``1.0.0`` directory declaring ``version = "1.0.1"`` -- the package is
+    in the list, in the right root, on the path, and still invisible to every
+    resolve. rez skips it and says nothing.
+
+    Returns ``{}`` when the file cannot be read or parsed, which is itself
+    worth knowing: rez cannot read it either.
+    """
+    definition = Path(path)
+    if definition.is_dir():
+        name = _definition_in(definition)
+        if not name:
+            return {}
+        definition = definition / name
+
+    try:
+        source = definition.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {}
+
+    if definition.suffix in (".yaml", ".yml"):
+        found: dict[str, str] = {}
+        for line in source.splitlines():
+            key, sep, value = line.partition(":")
+            if sep and key.strip() in ("name", "version"):
+                found[key.strip()] = value.strip().strip("'\"")
+        return found
+
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return {}
+
+    found = {}
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if not isinstance(target, ast.Name) or target.id not in ("name", "version"):
+                continue
+            if isinstance(node.value, ast.Constant) and isinstance(
+                node.value.value, (str, int, float)
+            ):
+                found[target.id] = str(node.value.value)
+    return found
+
+
+def definition_mismatch(package: LocalPackage) -> str:
+    """Why rez would skip this package, or "" if it would not.
+
+    Only reports what it is sure of. A definition it cannot parse is reported
+    too, because that is exactly the state rez treats as "not a package".
+    """
+    fields = definition_fields(package.path)
+    if not fields:
+        return "%s could not be read - rez will skip this package" % (
+            package.definition or "the package definition"
+        )
+
+    declared_name = fields.get("name", "")
+    if declared_name and declared_name != package.name:
+        return "the definition declares name '%s', so rez sees it as %s, not %s" % (
+            declared_name,
+            declared_name,
+            package.name,
+        )
+
+    declared_version = fields.get("version", "")
+    if package.version and declared_version and declared_version != package.version:
+        return (
+            "the directory says version %s but the definition declares %s"
+            % (package.version, declared_version)
+        )
+    return ""
 
 
 def delete_package(package: LocalPackage, root: Path | str) -> str:

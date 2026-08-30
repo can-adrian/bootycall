@@ -780,11 +780,28 @@ QApplication.processEvents()
 kept, note = launcher.filtered_packages_path(window.excluded_roots())
 check("both can be off at once", kept == ["/ice/rez/packages/int"], str(kept))
 
-print("\nan exclusion that cannot be applied says so")
+print("\nexcluding a root rez was never reading is not a problem")
 launcher._PACKAGES_PATH = None
 os.environ["REZ_PACKAGES_PATH"] = "/ice/rez/packages/int"
 kept, note = launcher.filtered_packages_path(window.excluded_roots())
-check("reports that nothing matched", "nothing was excluded" in note, note)
+check(
+    "the root is not on the resulting path, which is what was asked for",
+    all(str(r) not in kept for r in (_lp.local_root(), _lp.dev_root())),
+    str(kept),
+)
+check(
+    "so there is nothing to report - this used to warn on every switch-off",
+    note == "",
+    note,
+)
+# Excluded and included at once is a caller contradiction, and the guard is
+# there so it surfaces rather than silently resolving one way.
+_contradiction = launcher.filtered_packages_path((str(_lp.dev_root()),), (str(_lp.dev_root()),))
+check(
+    "but an exclusion that genuinely did not take does say so",
+    "could not take" in _contradiction[1],
+    str(_contradiction),
+)
 launcher._PACKAGES_PATH = None
 del os.environ["REZ_PACKAGES_PATH"]
 kept, note = launcher.filtered_packages_path(window.excluded_roots())
@@ -2105,6 +2122,54 @@ check(
     "and every tile is inside the row that holds them",
     _bottom <= window.dcc_container.height(),
     "%d in %d" % (_bottom, window.dcc_container.height()),
+)
+
+print("\ncompact has no title bar to truncate a title in")
+window.set_compact(True)
+QApplication.processEvents()
+check("the title is cleared", window.windowTitle() == "", window.windowTitle())
+check(
+    "and the decoration is gone, so nothing draws one of its own",
+    bool(window.windowFlags() & Qt.FramelessWindowHint),
+)
+check("dragging is armed only there", hasattr(window, "_drag_from"))
+window.set_compact(False)
+QApplication.processEvents()
+check("expanding puts the frame back", not (window.windowFlags() & Qt.FramelessWindowHint))
+check(
+    "and the title with it",
+    window.windowTitle() == window.EXPANDED_TITLE,
+    window.windowTitle(),
+)
+
+print("\ndiagnostics, for when a package is not where you expect it")
+from bootycall import diagnostics as _diag  # noqa: E402
+
+pin("batman_returns")
+_report = _diag.report(window)
+for _needle in (
+    "what rez itself is configured to read",
+    "the path this launch will actually use",
+    "installed dev packages",
+    "local packages",
+    "the dev working location",
+    "what will be run",
+):
+    check("the report covers: %s" % _needle, _needle in _report, _report[:120])
+check(
+    "it names the roots in play",
+    str(_lp.local_root()) in _report and str(_lp.dev_root()) in _report,
+)
+check("and what each definition declares", "definition declares:" in _report)
+check(
+    "and the command that would run",
+    "rez-env" in _report,
+    _report[-200:],
+)
+check(
+    "the Edit menu offers it",
+    window.diagnostics_action in window.edit_menu.actions(),
+    str([a.text() for a in window.edit_menu.actions()]),
 )
 
 print("\nfavourites window")

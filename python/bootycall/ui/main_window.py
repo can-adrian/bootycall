@@ -53,6 +53,7 @@ from ..local_packages import (
     LocalPackage,
     LocalPackagesUnavailable,
     current_user,
+    definition_mismatch,
     delete_package,
     dev_root,
     dev_working_root,
@@ -183,6 +184,8 @@ class MainWindow(QMainWindow):
         self._preferred_dcc: str | None = None
         self._active_dcc: config.Dcc | None = None
         self._compact = False
+        #: Where the pointer grabbed the window, while dragging it.
+        self._drag_from = None
         self._expanded_size = None
         self._expanded_minimum = None
         self._local_packages: list[LocalPackage] = []
@@ -459,6 +462,14 @@ class MainWindow(QMainWindow):
         self.copy_action.triggered.connect(self._on_copy_command)
         self.addAction(self.copy_action)
 
+        self.diagnostics_action = QAction("&Diagnostics...", self)
+        self.diagnostics_action.setToolTip(
+            "Why is my package not in the environment? Everything that decides "
+            "that, in one report."
+        )
+        self.diagnostics_action.triggered.connect(self.show_diagnostics)
+        self.addAction(self.diagnostics_action)
+
         self.quit_action = QAction("&Quit", self)
         self.quit_action.setShortcut(QKeySequence.Quit)
         self.quit_action.triggered.connect(self.close)
@@ -479,6 +490,8 @@ class MainWindow(QMainWindow):
         # thing people go looking for, and burying them under File hides them.
         self.edit_menu = self.menuBar().addMenu("&Edit")
         self.edit_menu.addAction(self.copy_action)
+        self.edit_menu.addSeparator()
+        self.edit_menu.addAction(self.diagnostics_action)
 
         settings_menu = self.menuBar().addMenu("Se&ttings")
         settings_menu.addAction(self.settings_action)
@@ -1173,7 +1186,7 @@ class MainWindow(QMainWindow):
             item = QListWidgetItem(request)
             tips = []
             if duplicate:
-                item.setForeground(QColor("#7c828d"))
+                item.setForeground(QColor("#90a8c2"))
                 tips.append("Listed more than once in this package set")
             roots = shadowed.get(request)
             if roots:
@@ -1309,14 +1322,14 @@ class MainWindow(QMainWindow):
             frame.set_badge("none")
             frame.set_note("")
             item = QListWidgetItem(empty_hint)
-            item.setForeground(QColor("#7c828d"))
+            item.setForeground(QColor("#90a8c2"))
             item.setToolTip("Expected at %s" % root)
             listing.addItem(item)
         elif not packages:
             frame.set_badge("none")
             frame.set_note("")
             item = QListWidgetItem(empty_hint)
-            item.setForeground(QColor("#7c828d"))
+            item.setForeground(QColor("#90a8c2"))
             listing.addItem(item)
         else:
             frame.set_badge("%d packages" % len(packages))
@@ -1329,6 +1342,16 @@ class MainWindow(QMainWindow):
                 item.setData(_PACKAGE_NAME_ROLE, package.name)
                 item.setData(_PACKAGE_PATH_ROLE, str(package.path))
                 tip = "%s\n%s" % (package.path, package.definition)
+
+                # A package rez will skip is worth flagging before anything
+                # else this list says about it: an override that rez never
+                # sees is not an override, it is a puzzle.
+                problem = definition_mismatch(package)
+                if problem:
+                    item.setText("%s      %s" % (package.request, problem))
+                    item.setForeground(QColor("#e06c75"))
+                    tip += "\n\n%s" % problem
+
                 if tickable:
                     # Setting a check state is what puts a box on the row --
                     # ItemIsUserCheckable is already in Qt's default flags, so
@@ -1637,7 +1660,7 @@ class MainWindow(QMainWindow):
                     )
                 elif shadow is not None:
                     item.setText("%s      (older build)" % base)
-                    item.setForeground(QColor("#7c828d"))
+                    item.setForeground(QColor("#90a8c2"))
                 else:
                     item.setText(base)
                     item.setForeground(QColor("#d7dae0"))
@@ -1905,6 +1928,35 @@ class MainWindow(QMainWindow):
             str(root) for root in show_package_roots(project) if root.is_dir()
         )
 
+    def dev_root_path(self):
+        """The installed dev root, as the window understands it."""
+        return dev_root()
+
+    def local_root_path(self):
+        return local_root()
+
+    def dev_working_root_path(self):
+        return dev_working_root()
+
+    def show_diagnostics(self) -> None:
+        """Everything that decides whether a package reaches the environment."""
+        from .. import diagnostics
+
+        text = diagnostics.report(self)
+        QApplication.clipboard().setText(text)
+
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Information)
+        box.setWindowTitle("BootyCall diagnostics")
+        box.setText("Copied to the clipboard.")
+        box.setInformativeText(
+            "Everything that decides whether a package reaches the "
+            "environment: what rez is configured to read, what this launch "
+            "will use, what is on disk, and what each definition declares."
+        )
+        box.setDetailedText(text)
+        box.exec()
+
     def package_roots_in_play(self) -> tuple[str, ...]:
         """The per-user roots this window says are in play, most specific first.
 
@@ -2097,12 +2149,36 @@ class MainWindow(QMainWindow):
         that refuses to go behind anything is a nuisance, not a feature.
         """
         platform_hints.set_always_on_top(self, self._compact)
+        # Decoration off before the sticky call: setting a window flag
+        # recreates the native window, which would throw away the X11 property
+        # the sticky helper just set.
+        platform_hints.set_frameless(self, self._compact)
         note = platform_hints.set_visible_on_all_workspaces(self, self._compact)
         if self._compact and note:
             # Worth saying once, not worth blocking on.
             self.compact_button.setToolTip(
                 "Back to the full window (Ctrl+M)\n\nNote: %s" % note
             )
+
+    def mousePressEvent(self, event) -> None:
+        """Start a drag. Only in compact -- expanded has a title bar to grab."""
+        if self._compact and event.button() == Qt.LeftButton:
+            self._drag_from = (
+                event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            )
+        else:
+            self._drag_from = None
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._drag_from is not None and event.buttons() & Qt.LeftButton:
+            self.move(event.globalPosition().toPoint() - self._drag_from)
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        self._drag_from = None
+        super().mouseReleaseEvent(event)
 
     def _apply_compact_filter(self) -> None:
         """Show only the selected chip and tile while compact, as labels.

@@ -261,6 +261,59 @@ _shutil.rmtree(sandbox, ignore_errors=True)
 _shutil.rmtree(real, ignore_errors=True)
 _shutil.rmtree(outside_dir, ignore_errors=True)
 
+print("\nwhat the definition itself declares")
+_defs = Path(tempfile.mkdtemp(prefix="bootycall-defs-"))
+
+
+def _make(name, version, declared_name=None, declared_version=None, body=None):
+    d = _defs / name / version if version else _defs / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "package.py").write_text(
+        body
+        if body is not None
+        else "name = '%s'\nversion = '%s'\nrequires = []\n"
+        % (declared_name or name, declared_version or version or "1.0.0")
+    )
+    return lp.LocalPackage(name=name, version=version, path=d, definition="package.py")
+
+
+_good = _make("nuke_utils", "4.10.0")
+check(
+    "name and version are read without importing anything",
+    lp.definition_fields(_good.path) == {"name": "nuke_utils", "version": "4.10.0"},
+    str(lp.definition_fields(_good.path)),
+)
+check("and nothing is wrong with it", lp.definition_mismatch(_good) == "")
+
+_renamed = _make("nuke_utils_x", "1.0.0", declared_name="something_else")
+check(
+    "a definition declaring a different name is caught",
+    "declares name 'something_else'" in lp.definition_mismatch(_renamed),
+    lp.definition_mismatch(_renamed),
+)
+
+_misversioned = _make("shot_tools", "1.0.0", declared_version="1.0.1")
+check(
+    "so is a version that disagrees with its directory",
+    "1.0.0" in lp.definition_mismatch(_misversioned)
+    and "1.0.1" in lp.definition_mismatch(_misversioned),
+    lp.definition_mismatch(_misversioned),
+)
+
+_broken = _make("broken", "1.0.0", body="name = 'broken'\nversion = (\n")
+check(
+    "a definition rez cannot parse is reported, since rez skips it too",
+    "could not be read" in lp.definition_mismatch(_broken),
+    lp.definition_mismatch(_broken),
+)
+
+_unversioned = _make("scratch", "", declared_version="0.1.0")
+check(
+    "an unversioned directory does not argue with the version it declares",
+    lp.definition_mismatch(_unversioned) == "",
+    lp.definition_mismatch(_unversioned),
+)
+
 print("\nmissing root is not an error")
 missing = Path(tempfile.mkdtemp(prefix="bootycall-local-")) / "nope" / "dev"
 check("empty list", lp.list_local_packages(missing) == [])

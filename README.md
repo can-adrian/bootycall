@@ -200,6 +200,27 @@ over your `4.10`, however early your root sits. BootyCall cannot see the studio
 versions without asking rez, so it says "overrides" and the tooltip says the
 rest.
 
+### When a package is not where you expect it
+
+**Edit → Diagnostics** copies a report covering every step between a package
+existing and it being in your environment:
+
+* what rez itself is configured to read (`REZ_PACKAGES_PATH`, else
+  `rez-config packages_path`);
+* the path this launch will actually use, and which entries are only there
+  because BootyCall put them there;
+* every package found, with the **name and version its own definition declares**;
+* the request that names it, and whether that version can satisfy it;
+* the exact command that would run.
+
+That third point catches a failure nothing else here can see. BootyCall lists
+packages by *directory*; rez resolves them by what the definition *says*. A
+folder called `nuke_utils` whose `package.py` declares `nuke_utils_dev`, a
+`1.0.0` directory declaring `version = "1.0.1"`, or a definition with a syntax
+error — each one is in the list, in the right root, on the path, and skipped by
+every resolve without a word. Those rows are now flagged in red. The definition
+is read with `ast`, never imported.
+
 ### Dev packages: working copies and installed ones
 
 Two locations, and the whole feature is the gap between them.
