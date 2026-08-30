@@ -10,6 +10,32 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.5.0
+
+Two bugs with the same symptom: a local or dev package shown as overriding the
+resolve that neither Launch nor Terminal actually picked up.
+
+- **The per-user roots are now put on `REZ_PACKAGES_PATH`.** BootyCall showed
+  your local and dev packages, told you which ones override, and then left
+  getting those roots onto the path to the site's rez config -- assuming the two
+  agreed. Where they did not, the package sat in the list marked as overriding
+  and never reached a single launch. Roots the site already lists are left
+  exactly where they are, so this changes nothing at a site that was already
+  configured for it. Dev goes ahead of local.
+- **Each section says when rez does not know its root**, under the path, so the
+  case above is visible rather than inferred -- and it warns you that anything
+  launched outside BootyCall will not see those packages.
+- **Overrides are checked against the version, not just the name.** A dev
+  `nuke_utils-4.9.0` against a request for `nuke_utils-4.10` was reported as an
+  override; rez will not look at it twice. Those rows now read *does not satisfy
+  <request>* in red and are not counted as in use. The prefix and `X+` request
+  forms are decided; anything more complex makes no claim rather than a wrong
+  one.
+- The override tooltip now says the thing that was missing: rez picks the
+  highest version satisfying the request across every package path, so a newer
+  studio build of the same name still wins. Path order only settles ties between
+  equal versions -- being earlier on the path does not beat a higher version.
+
 ## 0.4.0
 
 Minor rather than patch because the launch argv changed: a DCC now starts behind

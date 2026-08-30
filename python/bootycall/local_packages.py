@@ -250,19 +250,100 @@ def request_name(request: str) -> str:
     return request.split("-", 1)[0].strip()
 
 
+def request_range(request: str) -> str:
+    """The version part of a rez request (``nuke_utils-4`` -> ``4``)."""
+    _, _, rest = request.partition("-")
+    return rest.strip()
+
+
+def satisfies(version: str, request: str) -> bool | None:
+    """Can ``version`` be used for ``request``? ``None`` when we cannot tell.
+
+    Only the request forms the bootstraps actually use are decided here:
+
+    * no version at all (``base``) -- anything satisfies it;
+    * a prefix range (``nuke-16.0``, ``base-6``) -- rez reads this as "any
+      version starting 16.0", so ``16.0.3`` satisfies it and ``16.1`` does not;
+    * a lower bound (``python-3+``).
+
+    Everything else -- explicit ranges, unions, exclusions -- returns ``None``,
+    and callers must treat that as "no claim". Guessing at a range this does
+    not understand would trade a warning that is sometimes missing for one that
+    is sometimes wrong, which is the worse of the two.
+    """
+    wanted = request_range(request)
+    if not wanted:
+        return True
+    if any(c in wanted for c in "<>,|"):
+        return None
+    if not version:
+        # An unversioned package satisfies only an unversioned request.
+        return False
+
+    if wanted.endswith("+"):
+        base = wanted[:-1].strip()
+        if not base:
+            return True
+        return version_key(version) >= version_key(base)
+
+    if ".." in wanted:
+        return None
+
+    # A prefix range: every part the request names must match, and the version
+    # may carry more parts after them.
+    wanted_parts = re.split(r"[._-]+", wanted)
+    version_parts = re.split(r"[._-]+", version)
+    if len(wanted_parts) > len(version_parts):
+        return False
+    return all(a == b for a, b in zip(wanted_parts, version_parts))
+
+
+@dataclass(frozen=True)
+class Shadow:
+    """A local build that the resolve names, and whether it can actually be used."""
+
+    name: str
+    #: The request from the show's package list that names it.
+    request: str
+    #: False when the build provably cannot satisfy that request, so rez will
+    #: never choose it. None when the request form is one we do not decide.
+    usable: bool | None = True
+
+    @property
+    def blocked(self) -> bool:
+        return self.usable is False
+
+
 def shadowed_requests(
     packages: Iterable[LocalPackage], requests: Sequence[str]
-) -> dict[str, str]:
-    """Map local package name -> the request it would shadow in this resolve.
+) -> dict[str, Shadow]:
+    """Map local package name -> what the resolve asks of it.
 
-    Matching is by package name only. A dev ``nuke_utils`` takes precedence over
-    the studio one whatever version the show asked for, so a version match is
-    not required for the override to bite.
+    Names are matched first, then the version is checked against the request.
+    Both halves matter, and the second one used to be missing: a dev
+    ``nuke_utils-4.9.0`` against a request of ``nuke_utils-4.10`` is not an
+    override, it is a build rez will not look at twice.
+
+    Even a usable one is only a *candidate*. rez picks the highest version
+    satisfying the request across every package path, and path order breaks
+    ties between equal versions rather than beating a higher one -- so a studio
+    build newer than yours still wins. That is a fact about rez, not something
+    BootyCall can see without asking it, so the wording it drives has to stay
+    "overrides" rather than "will be used".
     """
     by_name = {request_name(r): r for r in requests}
-    hits: dict[str, str] = {}
+    hits: dict[str, Shadow] = {}
     for package in packages:
         request = by_name.get(package.name)
-        if request is not None:
-            hits[package.name] = request
+        if request is None:
+            continue
+        # Keep the first (newest) build of a name: the list is newest-first,
+        # and an older one losing tells you nothing.
+        if package.name in hits:
+            continue
+        hits[package.name] = Shadow(
+            name=package.name,
+            request=request,
+            usable=satisfies(package.version, request),
+        )
     return hits

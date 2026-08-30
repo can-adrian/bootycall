@@ -45,7 +45,7 @@ reported against something specific — and a rollback pulls the build you meant
 ./run_tests.sh
 ```
 
-Five suites, no framework: each is a plain script that prints `ok` / `FAIL`
+Eight suites, no framework: each is a plain script that prints `ok` / `FAIL`
 lines and exits non-zero on failure. The UI ones run against Qt's `offscreen`
 platform and write screenshots to `shots/`, so they work over SSH and in CI.
 
@@ -63,8 +63,8 @@ The tagline under the logo is drawn at random each launch from
    selected at a time, and that selection is what the rest of the window
    describes. Finds the selected show's bootstrap and reads its `packages`.
 3. Filters a **hard-coded** DCC list down to what the show actually defines.
-   The row shows Houdini Core, Houdini FX, Maya, Nuke and Terminal by default
-   and wraps as needed. Each tile carries its chosen variant's version in grey
+   The row shows Houdini, Maya and Terminal by default and wraps as needed; the
+   tiles are all one size, taken from the widest label present. Each tile carries its chosen variant's version in grey
    underneath.
 4. Shows the resolved package request for the selected variant, your local
    packages and your dev packages, in three collapsible sections (all closed by
@@ -79,7 +79,7 @@ same wrapping row.
 
 ```
 ┌───────────────────────────────────────────────────────┐
-│ (batman_returns ✕) (dune_pt3 ✕) (combat_2 ✕) Add a... │
+│ (batman_returns ✕) (dune_pt3 ✕) (combat_2 ✕)          │
 └───────────────────────────────────────────────────────┘
 ```
 
@@ -89,8 +89,8 @@ clicking its ✕ unpins it. Exactly one chip is selected, because everything und
 field — DCC, variant, package list, Launch — describes a single show.
 
 The entry takes whatever width the chips leave and drops to a new line when they
-fill one, and the field grows to match. The prompt shortens to "Add a show…"
-once chips are sharing the space.
+fill one, and the field grows to match. The prompt disappears entirely once
+there are chips in the field — they say what it is for.
 
 Enter on a show that's already pinned selects it instead of adding a second chip
 — hitting Enter twice on the same name should be idempotent, not an error. The
@@ -123,16 +123,16 @@ All closed on startup — the resolve alone is 30-odd lines you rarely need — 
 each header carries a badge so it still reports what's inside while shut:
 
 ```
-☑ ▸ Resolved packages                    nuke - 30 packages   2 overridden locally
+  ▸ Resolved packages                    nuke - 30 packages   2 overridden locally
 ☑ ▸ Local packages                            4 packages      1 in use
-☑ ▸ Dev packages                              8 packages      1 in use
+☑ ▸ Installed Dev Packages                    8 packages      1 in use
 ```
 
 ### Switching a section off
 
-The checkbox decides whether that section's packages are **in play**. All three
-start checked; Resolved is locked on, since there is nothing to launch without
-it.
+The checkbox decides whether that section's packages are **in play**. Both start
+checked. Resolved has no checkbox at all — there is nothing to launch without
+it, and an always-on control is only something to wonder about.
 
 Unchecking is not cosmetic. Local and dev packages never appear in the request —
 they reach a resolve through `REZ_PACKAGES_PATH` — so the only honest way to
@@ -174,6 +174,31 @@ that, `dev` reads as a package whose "versions" are your dev package names — a
 quietly wrong list rather than a visible error, which is why there's a test
 asserting the blacklist is load-bearing. Blacklisting the word is safe on the
 assumption no rez package will ever be called `dev`.
+
+### What "overrides" actually means
+
+Two things have to be true before a local build wins, and BootyCall used to
+check neither properly.
+
+**rez has to be looking in that root.** BootyCall puts your local and dev roots
+on `REZ_PACKAGES_PATH` for everything it launches, dev ahead of local, and skips
+any the site's own config already lists — so a configured site is unaffected and
+an unconfigured one stops silently ignoring your packages. When a root is only
+there because BootyCall put it there, the section says so under the path. Worth
+noticing: anything you launch *outside* BootyCall will not see those packages.
+
+**The version has to satisfy the request.** A dev `nuke_utils-4.9.0` against a
+show asking for `nuke_utils-4.10` is not an override — rez will not look at it
+twice. Those rows read *does not satisfy nuke_utils-4.10* in red and are not
+counted as in use. Prefix ranges (`nuke-16.0`) and lower bounds (`python-3+`)
+are decided; anything more complex makes no claim rather than a wrong one.
+
+Even then it is only a candidate. **rez picks the highest version satisfying the
+request across every package path** — path order settles ties between equal
+versions, it does not beat a higher one. A studio `nuke_utils-4.12` still wins
+over your `4.10`, however early your root sits. BootyCall cannot see the studio
+versions without asking rez, so it says "overrides" and the tooltip says the
+rest.
 
 ### Dev packages: working copies and installed ones
 

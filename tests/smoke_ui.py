@@ -1526,15 +1526,73 @@ pin("batman_returns")
 paths, note = launcher.filtered_packages_path(
     window.excluded_roots(), window.included_roots()
 )
-check("the show's package root is prepended", paths[0] == str(_found.root), str(paths))
-check("ahead of the studio path, so the show's copy wins", paths[1] == "/ice/rez/packages/int", str(paths))
+check(
+    "the show's package root is on the path",
+    str(_found.root) in paths,
+    str(paths),
+)
+check(
+    "ahead of the studio path, so the show's copy wins",
+    paths.index(str(_found.root)) < paths.index("/ice/rez/packages/int"),
+    str(paths),
+)
 check("no complaint", note == "", note)
+
+print("\nand so are the roots the window says are in play")
+check(
+    "the dev root is there - BootyCall shows it, so it has to put it there",
+    str(_lp.dev_root()) in paths,
+    str(paths),
+)
+check("and the local root", str(_lp.local_root()) in paths, str(paths))
+check(
+    "both ahead of the studio path",
+    paths.index(str(_lp.local_root())) < paths.index("/ice/rez/packages/int"),
+    str(paths),
+)
+check(
+    "dev ahead of local, since you install into it on purpose",
+    paths.index(str(_lp.dev_root())) < paths.index(str(_lp.local_root())),
+    str(paths),
+)
+check(
+    "and the window can say which of them rez was not already reading",
+    set(window.missing_from_rez_path())
+    == {str(_lp.local_root()), str(_lp.dev_root())},
+    str(window.missing_from_rez_path()),
+)
+
+os.environ["REZ_PACKAGES_PATH"] = "%s:%s:/ice/rez/packages/int" % (
+    _lp.dev_root(),
+    _lp.local_root(),
+)
+launcher._PACKAGES_PATH = None
+paths, note = launcher.filtered_packages_path(
+    window.excluded_roots(), window.included_roots()
+)
+check(
+    "a site that already lists them keeps its own order, nothing duplicated",
+    paths.count(str(_lp.local_root())) == 1
+    and paths.count(str(_lp.dev_root())) == 1,
+    str(paths),
+)
+check(
+    "and there is then nothing to report",
+    window.missing_from_rez_path() == (),
+    str(window.missing_from_rez_path()),
+)
+os.environ["REZ_PACKAGES_PATH"] = "/ice/rez/packages/int"
+launcher._PACKAGES_PATH = None
 
 pin("finishing_only")
 paths, note = launcher.filtered_packages_path(
     window.excluded_roots(), window.included_roots()
 )
-check("nothing added for a show without one", paths == [] and note == "", str(paths))
+check(
+    "a show without its own package still gets the per-user roots",
+    paths[:2] == [str(_lp.dev_root()), str(_lp.local_root())] and note == "",
+    str(paths),
+)
 if _saved:
     os.environ["REZ_PACKAGES_PATH"] = _saved
 else:
@@ -1986,17 +2044,37 @@ pin("batman_returns")
 window.local_frame.set_expanded(True)
 QApplication.processEvents()
 _texts = [window.local_list.item(i).text() for i in range(window.local_list.count())]
-_overriding = [t for t in _texts if "overrides" in t]
-check("something is overriding", bool(_overriding), str(_texts))
+_flagged = [t for t in _texts if "overrides" in t or "does not satisfy" in t]
+check("something in the root is named by this resolve", bool(_flagged), str(_texts))
 check(
     "and it is first, not buried in the list",
-    "overrides" in _texts[0],
+    _texts[0] in _flagged,
     str(_texts),
 )
 check(
     "the rest keep their order behind it",
     _texts[1:] == sorted(_texts[1:]),
     str(_texts[1:]),
+)
+
+print("\na build that cannot satisfy the request is not called an override")
+check(
+    "the fixture has one: nuke_plugins-4.1.0 against a request for nuke_plugins-3",
+    any("nuke_plugins" in t and "does not satisfy" in t for t in _texts),
+    str(_texts),
+)
+check(
+    "it is not counted as being in use",
+    "cannot be used" in window.local_frame.note.text(),
+    window.local_frame.note.text(),
+)
+_resolve_texts = [
+    window.package_list.item(i).text() for i in range(window.package_list.count())
+]
+check(
+    "and the resolve does not claim it is overridden either",
+    not any("nuke_plugins" in t and "overridden" in t for t in _resolve_texts),
+    str([t for t in _resolve_texts if "nuke_plugins" in t]),
 )
 
 print("\nthe menu bar carries Copy command now")

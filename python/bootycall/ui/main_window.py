@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import random
+from pathlib import Path
 
 from PySide6.QtCore import QPointF, QProcess, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import (
@@ -1158,10 +1159,12 @@ class MainWindow(QMainWindow):
         # and must not say it does.
         dev_hits = shadowed_requests(self.enabled_dev_packages(), packages)
         shadowed: dict[str, list[str]] = {}
-        for request in local_hits.values():
-            shadowed.setdefault(request, []).append("local")
-        for request in dev_hits.values():
-            shadowed.setdefault(request, []).append("dev")
+        for shadow in local_hits.values():
+            if not shadow.blocked:
+                shadowed.setdefault(shadow.request, []).append("local")
+        for shadow in dev_hits.values():
+            if not shadow.blocked:
+                shadowed.setdefault(shadow.request, []).append("dev")
 
         seen: set[str] = set()
         for request in packages:
@@ -1277,7 +1280,15 @@ class MainWindow(QMainWindow):
         empty_hint: str,
     ) -> list[LocalPackage]:
         """Scan one root and paint its section. Returns what it found."""
-        path_label.setText("%s   (user: %s)" % (root, current_user()))
+        label = "%s   (user: %s)" % (root, current_user())
+        if self._root_unknown_to_rez(root):
+            # The single most confusing state this window can be in is showing
+            # a package that never reaches a resolve. It cannot happen now --
+            # BootyCall puts the root on the path itself -- but it is still
+            # worth saying, because anything launched outside BootyCall will
+            # not see these packages at all.
+            label += "\n(not in your rez packages path - BootyCall adds it)"
+        path_label.setText(label)
 
         error = ""
         try:
@@ -1386,6 +1397,13 @@ class MainWindow(QMainWindow):
         return [p for p in self._dev_packages if p.name not in self._disabled_dev]
 
     # -- package context menu ----------------------------------------------
+
+    def _root_unknown_to_rez(self, root) -> bool:
+        """Is ``root`` somewhere rez's own configuration never looks?"""
+        known = {os.path.normpath(p) for p in launcher.packages_path()}
+        if not known:
+            return False  # cannot read the path: no claim either way
+        return os.path.normpath(str(root)) not in known
 
     def _section_for(self, listing: QListWidget):
         """The (packages, root, label) behind one of the two package lists."""
@@ -1586,18 +1604,38 @@ class MainWindow(QMainWindow):
                 name = item.data(_PACKAGE_NAME_ROLE)
                 if not name:
                     continue
-                request = overrides.get(name)
+                shadow = overrides.get(name)
                 base = item.text().split("      ")[0]
-                if request and name not in marked:
+                first = shadow is not None and name not in marked
+                if first:
                     marked.add(name)
-                    item.setText("%s      overrides %s" % (base, request))
+
+                if shadow is not None and shadow.blocked and first:
+                    # The resolve names this package, but this build cannot be
+                    # the one it gets. Saying "overrides" here is how you end
+                    # up staring at a package that is never in the environment.
+                    item.setText(
+                        "%s      does not satisfy %s" % (base, shadow.request)
+                    )
+                    item.setForeground(QColor("#e06c75"))
+                    item.setToolTip(
+                        "%s\nThe show asks for '%s', which this version cannot "
+                        "satisfy - rez will use the studio build instead."
+                        % (item.toolTip().split("\n")[0], shadow.request)
+                    )
+                elif shadow is not None and first:
+                    item.setText("%s      overrides %s" % (base, shadow.request))
                     item.setForeground(QColor("#e0a23c"))
                     item.setToolTip(
-                        "%s\nHighest version of '%s' in this root, so this is "
-                        "the one that replaces the show's '%s'."
-                        % (item.toolTip().split("\n")[0], name, request)
+                        "%s\nHighest version of '%s' in this root, and it "
+                        "satisfies the show's '%s'.\n\nrez still picks the "
+                        "highest version satisfying that request across every "
+                        "package path, so a newer studio build of the same name "
+                        "would win - path order only settles ties between equal "
+                        "versions."
+                        % (item.toolTip().split("\n")[0], name, shadow.request)
                     )
-                elif request:
+                elif shadow is not None:
                     item.setText("%s      (older build)" % base)
                     item.setForeground(QColor("#7c828d"))
                 else:
@@ -1609,10 +1647,17 @@ class MainWindow(QMainWindow):
             if not frame.is_checked():
                 frame.set_note("not used", "")
             elif packages:
-                frame.set_note(
-                    "%d in use" % len(overrides) if overrides else "",
-                    "warn" if overrides else "",
-                )
+                usable = [s for s in overrides.values() if not s.blocked]
+                blocked = [s for s in overrides.values() if s.blocked]
+                if blocked:
+                    frame.set_note(
+                        "%d cannot be used" % len(blocked), "error"
+                    )
+                else:
+                    frame.set_note(
+                        "%d in use" % len(usable) if usable else "",
+                        "warn" if usable else "",
+                    )
 
     def _float_overrides(self, listing: QListWidget, overrides: dict) -> None:
         """Lift the packages that override the resolve to the top of the list.
@@ -1847,10 +1892,7 @@ class MainWindow(QMainWindow):
         candidate roots go on instead of neither: rez found it somewhere, and a
         root that turns out to hold nothing costs a resolve nothing.
         """
-        extra: list[str] = []
-        view = self._dev_view_root()
-        if view is not None:
-            extra.append(str(view))
+        extra: list[str] = list(self.package_roots_in_play())
 
         show_pkg = self.show_package()
         if show_pkg is not None:
@@ -1861,6 +1903,52 @@ class MainWindow(QMainWindow):
             return tuple(extra)
         return tuple(extra) + tuple(
             str(root) for root in show_package_roots(project) if root.is_dir()
+        )
+
+    def package_roots_in_play(self) -> tuple[str, ...]:
+        """The per-user roots this window says are in play, most specific first.
+
+        BootyCall shows your local and dev packages and tells you which ones
+        override the resolve. It used to leave putting them on
+        ``REZ_PACKAGES_PATH`` to the site's rez config and simply assume the two
+        agreed -- and when they did not, the package sat there in the list,
+        marked as overriding, and never reached a single launch.
+
+        So it stops assuming. Roots the site already lists are left exactly
+        where they are (``filtered_packages_path`` drops duplicates), which
+        means this changes nothing at a site that was already configured for it
+        and fixes the one that was not.
+
+        Dev before local because the dev root is nested inside the local one and
+        is the more deliberate of the two: you install into it on purpose.
+        """
+        roots: list[str] = []
+
+        if self.dev_frame.is_checked():
+            view = self._dev_view_root()
+            roots.append(str(view) if view is not None else str(dev_root()))
+        if self.local_frame.is_checked():
+            roots.append(str(local_root()))
+
+        return tuple(r for r in roots if Path(r).is_dir())
+
+    def missing_from_rez_path(self) -> tuple[str, ...]:
+        """Roots in play that rez's own configuration does not list.
+
+        Worth saying out loud once: it means the packages BootyCall is showing
+        you are only in the resolve because BootyCall put them there, and
+        anything launched by hand will not see them.
+        """
+        known = {os.path.normpath(p) for p in launcher.packages_path()}
+        if not known:
+            return ()
+        return tuple(
+            root
+            for root in self.package_roots_in_play()
+            if os.path.normpath(root) not in known
+            # The filtered view is BootyCall's own construction; rez has no
+            # reason to know about it and its absence is not news.
+            and os.path.normpath(root) != os.path.normpath(str(dev_install.view_root()))
         )
 
     def _on_open_terminal(self) -> None:

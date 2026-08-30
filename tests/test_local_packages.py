@@ -128,7 +128,7 @@ check("bare name", lp.request_name("prep_utils") == "prep_utils")
 print("\noverride detection")
 nuke_resolve = ("nuke-16.0", "base-6", "nuke_utils-4", "nuke_plugins-4", "cattery-1")
 hits = lp.shadowed_requests(packages, nuke_resolve)
-check("nuke_utils flagged", hits.get("nuke_utils") == "nuke_utils-4", str(hits))
+check("nuke_utils flagged", hits["nuke_utils"].request == "nuke_utils-4", str(hits))
 check("only the overlap", set(hits) == {"nuke_utils"}, str(hits))
 
 houdini_resolve = ("houdini-21.0", "houdini_utils-6", "axiom-3")
@@ -139,9 +139,45 @@ check(
     str(hits),
 )
 check(
-    "version mismatch still counts (dev 6.1.0 vs request 6)",
-    hits["houdini_utils"] == "houdini_utils-6",
+    "a 6.1.0 build satisfies a request for 6, so it can be the override",
+    hits["houdini_utils"].request == "houdini_utils-6"
+    and hits["houdini_utils"].usable is True,
     str(hits),
+)
+
+print("\nwhether the build can actually be used for the request")
+check("no version asked for, anything does", lp.satisfies("4.9.0", "nuke_utils"))
+check("prefix range matches deeper versions", lp.satisfies("16.0.3", "nuke-16.0"))
+check(
+    "but not a different one - 16.1 is not in the 16.0 range",
+    lp.satisfies("16.1", "nuke-16.0") is False,
+)
+check(
+    "an older build cannot satisfy a newer pin",
+    lp.satisfies("4.9.0", "nuke_utils-4.10") is False,
+)
+check("a lower bound is a lower bound", lp.satisfies("3.9", "python-3+") is True)
+check("and excludes what is below it", lp.satisfies("2.7", "python-3+") is False)
+check(
+    "an unversioned build cannot satisfy a versioned request",
+    lp.satisfies("", "nuke_utils-4") is False,
+)
+check(
+    "a range we do not parse makes no claim either way",
+    lp.satisfies("1.0", "thing-1<2") is None,
+)
+
+blocked_resolve = ("houdini_utils-6.5",)
+blocked = lp.shadowed_requests(packages, blocked_resolve)
+check(
+    "a build that cannot satisfy the request is marked, not called an override",
+    blocked["houdini_utils"].blocked is True,
+    str(blocked),
+)
+check(
+    "and one that can is not marked",
+    lp.shadowed_requests(packages, ("houdini_utils-6",))["houdini_utils"].blocked
+    is False,
 )
 
 check("empty resolve, no hits", lp.shadowed_requests(packages, ()) == {})
