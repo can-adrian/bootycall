@@ -10,6 +10,23 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.6.1
+
+- **File → Reload** replaces *Reload shows* and reloads all of it: the shows
+  list, the selected show's bootstrap, both package roots, the saved settings,
+  and rez's cached packages path. Re-listing one of those and not the others
+  left a window half stale, which is worse than wholly stale — you cannot tell
+  which half you are looking at.
+- **The Settings menu is gone.** The action is in File, and one door per room.
+- **"In use" and "overridden" are counted apart**, amber and red:
+  `1 in use   2 overridden`. They are different facts — a build the resolve
+  will get, against one the resolve names and then takes from somewhere else —
+  and reporting the second as the first is what sent a week of debugging after
+  an install that was never broken.
+- The resolve list now only marks a request *overridden by your local build*
+  when that build actually wins. A mark that says the question is answered when
+  it is not is worse than no mark.
+
 ## 0.6.0
 
 **The launch now says which resolved packages are yours.** Minor, because the

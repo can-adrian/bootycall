@@ -168,27 +168,31 @@ def _badge(letter: str, color: str, size: int = 26) -> QPixmap:
     )
 
 
-def _same_root(root, package_path) -> bool:
-    """Is ``package_path`` inside ``root``? Both may be str or Path."""
-    if not package_path:
+def _winner_is_ours(winner, packages) -> bool:
+    """Did the build that wins come from this section's own list?
+
+    Resolved through symlinks rather than compared as strings: when some dev
+    packages are switched off the path carries a *view* of the dev root made of
+    links, so the root that wins is not spelled the same as the root the list
+    was scanned from -- but it points at the same directory.
+    """
+    if winner is None:
         return False
-    try:
-        return str(root) in str(Path(package_path).parents[1]) or str(
-            Path(package_path)
-        ).startswith(str(root) + os.sep)
-    except IndexError:
-        return str(package_path).startswith(str(root) + os.sep)
+    target = Path(winner.root) / winner.name
+    if winner.version:
+        target = target / winner.version
 
-
-def package_version_of(item) -> str:
-    """The version out of a list row's request text (``nuke_utils-4.9.0``)."""
-    text = item.data(_PACKAGE_NAME_ROLE) or ""
-    path = item.data(_PACKAGE_PATH_ROLE) or ""
-    if not path:
-        return ""
-    leaf = Path(path).name
-    # An unversioned package's directory is the name itself.
-    return "" if leaf == text else leaf
+    for package in packages:
+        if package.name != winner.name or package.version != winner.version:
+            continue
+        try:
+            if Path(package.path).resolve() == target.resolve():
+                return True
+        except OSError:
+            pass
+        if str(package.path) == str(target):
+            return True
+    return False
 
 
 class MainWindow(QMainWindow):
@@ -463,9 +467,13 @@ class MainWindow(QMainWindow):
         self.terminal_action.triggered.connect(self._on_open_terminal)
         self.addAction(self.terminal_action)
 
-        self.reload_action = QAction("&Reload shows", self)
+        self.reload_action = QAction("&Reload", self)
         self.reload_action.setShortcut(QKeySequence.Refresh)
-        self.reload_action.triggered.connect(self.reload_projects)
+        self.reload_action.setToolTip(
+            "Re-read everything: shows, the selected show's bootstrap, your "
+            "package roots, and rez's packages path."
+        )
+        self.reload_action.triggered.connect(self.reload_all)
         self.addAction(self.reload_action)
 
         self.focus_action = QAction("&Find show", self)
@@ -531,9 +539,6 @@ class MainWindow(QMainWindow):
         self.edit_menu.addSeparator()
         self.edit_menu.addAction(self.diagnostics_action)
         self.edit_menu.addAction(self.resolve_test_action)
-
-        settings_menu = self.menuBar().addMenu("Se&ttings")
-        settings_menu.addAction(self.settings_action)
 
         self.software_menu = self.menuBar().addMenu("&Softwares")
         self._software_actions: dict[str, QAction] = {}
@@ -794,6 +799,37 @@ class MainWindow(QMainWindow):
             )
 
     # -- data --------------------------------------------------------------
+
+    def reload_all(self) -> None:
+        """Re-read everything the window is showing.
+
+        "Reload shows" only re-listed the shows folder, which is the one thing
+        that rarely changes while you are working. What does change is
+        everything downstream of it: a bootstrap someone edited, a package you
+        installed from a terminal, a rez config the site updated. Reloading one
+        of those and not the others leaves a window that is half stale, which
+        is worse than one that is wholly stale, because you cannot tell which
+        half you are looking at.
+
+        So all the caches go, in dependency order, and the window is rebuilt
+        from disk.
+        """
+        # Asked once and remembered; a site that changed its config would
+        # otherwise need BootyCall restarted to notice.
+        launcher._PACKAGES_PATH = None
+        # Keyed by bootstrap mtime, so an edited bootstrap re-probes anyway --
+        # but a probe command that has since been fixed would not.
+        self._probe_cache.clear()
+        self._winner_cache.clear()
+        # Settings may have been changed in another window sharing the file.
+        self.store.load()
+        config.set_path_overrides(self.store.path_overrides())
+
+        self.reload_projects()
+        self.refresh_package_lists()
+        self.statusBar().showMessage(
+            "Reloaded shows, bootstraps, package roots and the rez path", 6000
+        )
 
     def reload_projects(self) -> None:
         self.refresh_package_lists()
@@ -1212,10 +1248,10 @@ class MainWindow(QMainWindow):
         dev_hits = shadowed_requests(self.enabled_dev_packages(), packages)
         shadowed: dict[str, list[str]] = {}
         for shadow in local_hits.values():
-            if not shadow.blocked:
+            if self._override_takes_effect(shadow, self._local_packages):
                 shadowed.setdefault(shadow.request, []).append("local")
         for shadow in dev_hits.values():
-            if not shadow.blocked:
+            if self._override_takes_effect(shadow, self.enabled_dev_packages()):
                 shadowed.setdefault(shadow.request, []).append("dev")
 
         seen: set[str] = set()
@@ -1483,6 +1519,19 @@ class MainWindow(QMainWindow):
             return False  # cannot read the path: no claim either way
         return os.path.normpath(str(root)) not in known
 
+    def _override_takes_effect(self, shadow, packages) -> bool:
+        """Will this build of ours really be the one the resolve gets?
+
+        The resolve list used to say "overridden by your local build" on the
+        strength of a name match alone. It has to mean it: a request marked as
+        overridden that resolves to the studio package is worse than no mark,
+        because it is an answer that stops you looking.
+        """
+        if shadow.blocked:
+            return False
+        winner = self._winner_for(shadow.name, shadow.request)
+        return winner is None or _winner_is_ours(winner, packages)
+
     def _section_for(self, listing: QListWidget):
         """The (packages, root, label) behind one of the two package lists."""
         if listing is self.dev_list:
@@ -1704,11 +1753,9 @@ class MainWindow(QMainWindow):
                     )
                 elif shadow is not None and first:
                     winner = self._winner_for(name, shadow.request)
-                    mine = winner is not None and _same_root(
-                        winner.root, item.data(_PACKAGE_PATH_ROLE)
-                    ) and winner.version == package_version_of(item)
+                    mine = winner is None or _winner_is_ours(winner, packages)
 
-                    if winner is not None and not mine:
+                    if not mine:
                         # The whole point of the list is to say what will be in
                         # the environment. A build that loses to a newer one
                         # elsewhere is not overriding anything, and calling it
@@ -1752,18 +1799,32 @@ class MainWindow(QMainWindow):
 
             if not frame.is_checked():
                 frame.set_note("not used", "")
+                frame.set_alert("")
             elif packages:
-                usable = [s for s in overrides.values() if not s.blocked]
-                blocked = [s for s in overrides.values() if s.blocked]
-                if blocked:
-                    frame.set_note(
-                        "%d cannot be used" % len(blocked), "error"
-                    )
-                else:
-                    frame.set_note(
-                        "%d in use" % len(usable) if usable else "",
-                        "warn" if usable else "",
-                    )
+                # Two different facts, counted separately. "In use" is a build
+                # of yours that the resolve will actually get; "overridden" is
+                # one the resolve names and then takes from somewhere else.
+                # Reporting the second as the first is what sent Adrian
+                # looking for a broken install for a week.
+                in_use = 0
+                overridden = 0
+                for name, shadow in overrides.items():
+                    if shadow.blocked:
+                        overridden += 1
+                        continue
+                    winner = self._winner_for(name, shadow.request)
+                    if winner is None or _winner_is_ours(winner, packages):
+                        in_use += 1
+                    else:
+                        overridden += 1
+
+                frame.set_note(
+                    "%d in use" % in_use if in_use else "",
+                    "warn" if in_use else "",
+                )
+                frame.set_alert("%d overridden" % overridden if overridden else "")
+            else:
+                frame.set_alert("")
 
     def _float_overrides(self, listing: QListWidget, overrides: dict) -> None:
         """Lift the packages that override the resolve to the top of the list.

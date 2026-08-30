@@ -125,7 +125,7 @@ each header carries a badge so it still reports what's inside while shut:
 ```
   ▸ Resolved packages                    nuke - 30 packages   2 overridden locally
 ☑ ▸ Local packages                            4 packages      1 in use
-☑ ▸ Installed Dev Packages                    8 packages      1 in use
+☑ ▸ Installed Dev Packages                    8 packages      1 in use  2 overridden
 ```
 
 ### Switching a section off
@@ -149,6 +149,13 @@ contains what you switched off.
 
 Both switches persist. Only the *off* state is written, so a config file with
 neither key means both on.
+
+The two badges on the right count different things and are coloured apart.
+**In use** (amber) is a build of yours the resolve will actually get.
+**Overridden** (red) is one the resolve names and then takes from somewhere
+else — outranked by a higher version, or a version that cannot satisfy the
+request at all. Both can be true at once, which is why they are two badges
+rather than one label that changes colour.
 
 Opening a section grows the window if it would otherwise squash the list;
 closing never shrinks it, since that would undo a size you chose.

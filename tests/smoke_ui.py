@@ -1238,7 +1238,12 @@ from bootycall.ui.settings_dialog import SettingsDialog  # noqa: E402
 from bootycall import config as cfg_mod  # noqa: E402
 
 _menus = [m.title().replace("&", "") for m in window.menuBar().findChildren(type(window.file_menu))]
-check("a Settings menu exists", "Settings" in _menus, str(_menus))
+check(
+    "there is no Settings menu - it lives in File, and one door is enough",
+    "Settings" not in _menus,
+    str(_menus),
+)
+check("File carries it", window.settings_action in window.file_menu.actions())
 check("and the software one is plural", "Softwares" in _menus, str(_menus))
 check("and a File entry too", window.settings_action in window.file_menu.actions())
 
@@ -2082,8 +2087,13 @@ check(
 )
 check(
     "it is not counted as being in use",
-    "cannot be used" in window.local_frame.note.text(),
+    window.local_frame.note.text() == "",
     window.local_frame.note.text(),
+)
+check(
+    "it is counted as overridden instead, in the red badge",
+    "overridden" in window.local_frame.alert.text(),
+    window.local_frame.alert.text(),
 )
 _resolve_texts = [
     window.package_list.item(i).text() for i in range(window.package_list.count())
@@ -2443,6 +2453,98 @@ QApplication.processEvents()
 unpin_all()
 pin("batman_returns")
 
+print("\nin use and overridden are counted apart")
+# The precedence fixture again: one dev build that wins, one that loses.
+cfg_mod.set_path_overrides(
+    {
+        "shows_root": str(_pr_shows),
+        "local_root": str(_pr_local),
+        "dev_root": "{local}/dev",
+    }
+)
+(_pr_shows / "demo" / ".ilp" / "pipeline" / "config.py").write_text(
+    "from ilp_bootstrap import Bootstrap\n"
+    "class ProjectBootstrap(Bootstrap):\n"
+    "    packages = dict(maya=('maya-2026', 'rig_utils-1', 'anim_bot-2'))\n"
+)
+_put(_pr_local / "dev", "anim_bot", "2.4.0")   # nothing newer anywhere: wins
+_put(_pr_studio, "rig_utils", "1.9.0")         # beats the dev 1.8.666
+_saved_rez = os.environ.get("REZ_PACKAGES_PATH")
+os.environ["REZ_PACKAGES_PATH"] = str(_pr_studio)
+launcher._PACKAGES_PATH = None
+window.reload_projects()
+QApplication.processEvents()
+unpin_all()
+pin("demo")
+window.dev_frame.set_expanded(True)
+QApplication.processEvents()
+
+check(
+    "the one that wins is in use",
+    window.dev_frame.note.text() == "1 in use",
+    window.dev_frame.note.text(),
+)
+check(
+    "the one that loses is overridden, separately and in red",
+    window.dev_frame.alert.text() == "1 overridden",
+    window.dev_frame.alert.text(),
+)
+check(
+    "the alert badge is visible when it has something to say",
+    window.dev_frame.alert.isVisible(),
+)
+
+_rows = [window.dev_list.item(i).text() for i in range(window.dev_list.count())]
+check(
+    "and the rows agree with the header",
+    any("anim_bot" in r and "overrides" in r for r in _rows)
+    and any("rig_utils" in r and "outranked" in r for r in _rows),
+    str(_rows),
+)
+
+_resolve_rows = [
+    window.package_list.item(i).text() for i in range(window.package_list.count())
+]
+check(
+    "the resolve list only marks the override that really happens",
+    any("anim_bot" in r and "overridden by" in r for r in _resolve_rows)
+    and not any("rig_utils" in r and "overridden by" in r for r in _resolve_rows),
+    str(_resolve_rows),
+)
+
+window.dev_frame.set_checked(False)
+QApplication.processEvents()
+check("a section switched off says so and nothing else", window.dev_frame.note.text() == "not used")
+check("with no red badge left over", window.dev_frame.alert.text() == "")
+window.dev_frame.set_checked(True)
+QApplication.processEvents()
+
+print("\nreload means all of it")
+_before_probe = dict(window._probe_cache)
+launcher._PACKAGES_PATH = ["/stale/path"]
+window._winner_cache[("x", "x-1")] = None
+window.reload_all()
+QApplication.processEvents()
+check("the rez path cache is dropped", launcher._PACKAGES_PATH != ["/stale/path"])
+check("the winner cache is dropped", ("x", "x-1") not in window._winner_cache)
+check("and the shows are still there", window.project_field.projects() != [])
+check(
+    "with a status message saying what it did",
+    "Reloaded" in window.statusBar().currentMessage(),
+    window.statusBar().currentMessage(),
+)
+
+cfg_mod.set_path_overrides({})
+if _saved_rez:
+    os.environ["REZ_PACKAGES_PATH"] = _saved_rez
+else:
+    os.environ.pop("REZ_PACKAGES_PATH", None)
+launcher._PACKAGES_PATH = None
+window.reload_projects()
+QApplication.processEvents()
+unpin_all()
+pin("batman_returns")
+
 print("\nfavourites window")
 from bootycall.configs import SavedConfig as _SC  # noqa: E402
 from bootycall.ui.config_menu import ConfigMenuAction  # noqa: E402
@@ -2579,7 +2681,7 @@ check("save entry first", texts[0].startswith("&Save current setup"), str(texts[
 check("header present", "Saved setups" in texts, str(texts))
 check("both configs listed", texts.count("[cfg] Nightly comp") == 1 and texts.count("[cfg] FX lookdev") == 1, str(texts))
 check("placeholder gone", "   Nothing saved yet" not in texts)
-check("reload still present", "&Reload shows" in texts)
+check("reload still present, and now means all of it", "&Reload" in texts, str(texts))
 check("quit still present", "&Quit" in texts)
 
 print("\nsaved setup rows carry a remove button")

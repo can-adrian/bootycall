@@ -101,10 +101,18 @@ class CollapsibleFrame(QWidget):
         self.badge.setObjectName("collapsibleBadge")
         header_layout.addWidget(self.badge)
 
-        self.note = QLabel("")
+        self.note = _ElidedLabel("")
         self.note.setObjectName("collapsibleNote")
         self.note.setVisible(False)
         header_layout.addWidget(self.note)
+
+        # A second badge rather than one that changes colour: "1 in use" and
+        # "2 overridden" are both true at once, and squeezing them into a
+        # single label means picking one colour for two different facts.
+        self.alert = _ElidedLabel("")
+        self.alert.setObjectName("collapsibleAlert")
+        self.alert.setVisible(False)
+        header_layout.addWidget(self.alert)
 
         outer.addWidget(header)
 
@@ -163,6 +171,12 @@ class CollapsibleFrame(QWidget):
         # It elides when the header is tight, so the full text has to be
         # reachable some other way.
         self.badge.setToolTip(text)
+
+    def set_alert(self, text: str) -> None:
+        """The red half of the header: your packages that are *not* in play."""
+        self.alert.setText(text)
+        self.alert.setToolTip(text)
+        self.alert.setVisible(bool(text))
 
     def set_note(self, text: str, level: str = "") -> None:
         """A highlighted note beside the badge, e.g. an override warning."""
