@@ -1414,7 +1414,11 @@ check(
 )
 
 print("\nthe terminal is held open when the command fails")
-check("the command is echoed before it runs", script.startswith('echo "+ rez-env'), script[:40])
+check(
+    "the request is echoed before it runs",
+    script.startswith("printf '+ %s\\n\\n' 'rez-env"),
+    script[:40],
+)
 check("the exit status is captured", "rc=$?" in script, script[-160:])
 check("and reported", "exited with status $rc" in script, script[-160:])
 check("with a pause so it can be read", "read -r -p" in script, script[-80:])
@@ -1511,6 +1515,22 @@ check(
     term_script[:120],
 )
 print("       %s" % launcher.terminal_preview(window.current_project(), term_pkgs)[:110] + " ...")
+
+# The terminal used to be the one launch path the report never reached: with
+# no command, rez_argv returned before anything could be wrapped around it.
+_term_banner = launcher.build_terminal_command(
+    term_pkgs, window.highlight_roots(), window.launch_notes()
+)[-1]
+check(
+    "the shell gets the same report a launch does",
+    "your packages in this environment" in _term_banner,
+    _term_banner[-120:],
+)
+check(
+    "and is still an interactive shell afterwards",
+    "exec bash" in _term_banner,
+    _term_banner[-60:],
+)
 
 pin("finishing_only")
 check(

@@ -2362,14 +2362,27 @@ class MainWindow(QMainWindow):
             return
         try:
             launcher.open_terminal(
-                project, packages, self.excluded_roots(), self.included_roots()
+                project,
+                packages,
+                self.excluded_roots(),
+                self.included_roots(),
+                roots=self.highlight_roots(),
+                notes=self.launch_notes(),
             )
         except OSError as exc:
             QMessageBox.critical(
                 self,
                 "Could not open a terminal",
                 "%s\n\nCommand:\n%s"
-                % (exc, launcher.terminal_preview(project, packages)),
+                % (
+                    exc,
+                    launcher.terminal_preview(
+                        project,
+                        packages,
+                        self.highlight_roots(),
+                        self.launch_notes(),
+                    ),
+                ),
             )
             return
         self.statusBar().showMessage(

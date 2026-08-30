@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -390,9 +392,9 @@ check(
 
 _script = launcher.build_script(("a-1",), "maya")
 check(
-    "the command is echoed first",
-    _script.startswith('echo "+ rez-env a-1 -- bash -c'),
-    _script[:60],
+    "the request is echoed first, not the reporting wrapper around it",
+    _script.startswith("printf '+ %s\\n\\n' 'rez-env a-1 -- maya'"),
+    _script[:70],
 )
 check("the status is captured and reported", "rc=$?" in _script and "$rc" in _script)
 check("and the window waits before closing", "read -r -p" in _script)
@@ -400,6 +402,67 @@ check(
     "requests with spaces are quoted, not split",
     "'a b-1'" in launcher.build_script(("a b-1",), "maya"),
     launcher.build_script(("a b-1",), "maya")[:70],
+)
+
+print("\nand the generated shell is shell bash can actually run")
+# Everything above reads the script as a string. A string can contain every
+# right substring and still be broken shell: for a release the banner was
+# assembled correctly and then dropped inside echo "...", where the quoting
+# flipped halfway through, and nothing printed at all. So hand it to bash.
+_banner_script = launcher.build_script(("a-1",), "maya", _roots)
+_parsed = subprocess.run(
+    ["bash", "-n"], input=_banner_script, capture_output=True, text=True
+)
+check(
+    "bash parses it",
+    _parsed.returncode == 0,
+    _parsed.stderr.strip()[:200],
+)
+check(
+    "and it is one line -- a real newline splits the one-liner in half",
+    "\n" not in _banner_script,
+    repr(_banner_script[:200]),
+)
+
+# Run the banner for real against a faked resolved environment, which is the
+# only way to know the reporting loop reads REZ_*_ROOT the way rez writes it.
+_ran = subprocess.run(
+    ["bash", "-c", launcher.launch_banner(_roots, (("warn", "off"),))],
+    capture_output=True,
+    text=True,
+    env={
+        "PATH": os.environ.get("PATH", ""),
+        "REZ_RIG_UTILS_ROOT": "/ice/local/adts/dev/rig_utils/1.8.666",
+        "REZ_RIG_UTILS_VERSION": "1.8.666",
+        "REZ_BASE_ROOT": "/ice/local/adts/base/6.56.1",
+        "REZ_BASE_VERSION": "6.56.1",
+    },
+)
+check("it runs clean", _ran.returncode == 0 and not _ran.stderr, _ran.stderr[:200])
+check("the note prints", "off" in _ran.stdout, _ran.stdout)
+check(
+    "the dev package is named with its version",
+    "rig_utils-1.8.666  (dev)" in _ran.stdout,
+    _ran.stdout,
+)
+check(
+    "the local one is labelled local",
+    "base-6.56.1  (local)" in _ran.stdout,
+    _ran.stdout,
+)
+
+print("\nthe terminal gets the report too")
+_term = launcher.rez_argv((), "", roots=_roots)
+check(
+    "a shell with something to report is started behind the banner",
+    _term[-1].rstrip().endswith("exec bash")
+    and "your packages in this environment" in _term[-1],
+    _term[-1][-60:],
+)
+check(
+    "with nothing to report it stays a bare rez-env, which prints rez's own",
+    launcher.rez_argv(("a-1",)) == ["rez-env", "a-1"],
+    str(launcher.rez_argv(("a-1",))),
 )
 
 print()

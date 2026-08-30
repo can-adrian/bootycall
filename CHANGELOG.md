@@ -10,6 +10,34 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.8.0
+
+Minor: the report from 0.7.0 never actually ran, and the shell never got one.
+
+- **Fixed the launch report, which printed nothing.** Two bugs, both in the
+  generated shell rather than in what it said. The per-root branch was built
+  with a real newline where a two-character `\n` was meant, splitting the
+  one-liner in half; and the whole argv was interpolated into `echo "+ ..."`,
+  where the quoting flipped partway through and the outer shell began
+  expanding and running fragments of the command it was only supposed to
+  display. What reached the terminal was `invalid indirect expansion` followed
+  by a syntax error — on a good day. 0.7.0 shipped a banner that was assembled
+  correctly and could not run.
+- **The terminal gets the report too.** `rez_argv` returned early whenever
+  there was no application to run, so the shell was the one launch path
+  nothing could be wrapped around. It now starts behind the same preamble when
+  there is something to say — `rez-context` for rez's table, then the report,
+  then the shell. With nothing to say it stays a bare `rez-env`, so rez's own
+  entry banner is untouched.
+- **The echoed command line is the request again**, not the reporting wrapper.
+  With the banner in, the real argv is a screenful of quoted shell, and a line
+  nobody reads answers no questions. You get `+ rez-env base-6 rig_utils --
+  maya`; the wrapper is still there, just not in your face.
+- Tests now hand the generated script to `bash -n` and run the banner against a
+  faked resolved environment. Every existing check passed against 0.7.0's
+  broken shell, because a string can contain every right substring and still be
+  shell that will not parse.
+
 ## 0.7.0
 
 Minor: the launch argv carries more than it did.

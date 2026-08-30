@@ -45,7 +45,7 @@ reported against something specific — and a rollback pulls the build you meant
 ./run_tests.sh
 ```
 
-Eight suites, no framework: each is a plain script that prints `ok` / `FAIL`
+Seven suites, no framework: each is a plain script that prints `ok` / `FAIL`
 lines and exits non-zero on failure. The UI ones run against Qt's `offscreen`
 platform and write screenshots to `shots/`, so they work over SSH and in CI.
 

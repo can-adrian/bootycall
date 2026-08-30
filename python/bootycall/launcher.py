@@ -278,7 +278,11 @@ def launch_banner(
 
     if roots:
         cases = "".join(
-            '%s/*) _bc_hits="$_bc_hits\n    $_bc_name  (%s)" ;; '
+            # \\n, not a real newline: the separator is a two-character escape
+            # that the closing ``printf %b`` expands. A real newline here goes
+            # into the generated shell verbatim and splits the one-liner in
+            # half, which is how this banner spent a release never running.
+            '%s/*) _bc_hits="$_bc_hits\\n    $_bc_name  (%s)" ;; '
             % (shlex.quote(root), label)
             for label, root in roots
         )
@@ -336,6 +340,19 @@ def context_preamble(
     return "; ".join(parts)
 
 
+def shell_preamble(
+    roots: Sequence[tuple[str, str]] = (),
+    notes: Sequence[tuple[str, str]] = (),
+) -> str:
+    """The same report, then an interactive shell instead of an application.
+
+    Giving ``rez-env`` a command costs you rez's own entry banner, so this puts
+    the equivalent table back with ``rez-context`` before handing over. Worth
+    the trade: the banner rez prints cannot say a root was switched off.
+    """
+    return context_preamble("bash", roots, notes)
+
+
 def rez_argv(
     packages: Sequence[str],
     command: str = "",
@@ -345,17 +362,23 @@ def rez_argv(
 ) -> list[str]:
     """The rez invocation itself, without a terminal around it.
 
-    With no command this is a bare ``rez-env``, which drops you in an
-    interactive resolved shell -- and rez prints the context on the way in, for
-    free. With a command there is no shell to do that, so unless asked not to,
-    the command is run behind :func:`context_preamble` to get the same report.
+    With no command this drops you in an interactive resolved shell. Bare
+    ``rez-env`` prints rez's context on the way in for free, so that is what
+    runs when there is nothing of our own to add. When there *is* -- a root
+    switched off, a dev package to point at -- the shell is started behind
+    :func:`shell_preamble` instead, which prints the same table via
+    ``rez-context`` and then the BootyCall report. Without this the terminal
+    was the one launch path the report never reached.
     """
     argv = ["rez-env", *packages]
-    if not command:
-        return argv
-
     if show_info is None:
         show_info = config.show_resolve_info()
+
+    if not command:
+        if show_info and (roots or notes):
+            argv += ["--", "bash", "-c", shell_preamble(roots, notes)]
+        return argv
+
     if show_info:
         argv += ["--", "bash", "-c", context_preamble(command, roots, notes)]
     else:
@@ -377,11 +400,24 @@ def build_script(
     non-zero exit says so and waits for Enter.
 
     Echoing the command is worth the line on its own -- when a resolve fails,
-    the first question is always what was actually asked for.
+    the first question is always what was actually asked for. So the echoed
+    line is the bare request, not the reporting wrapper around it: with the
+    banner in, the real argv is a screen of quoted shell, and a line nobody
+    reads answers no questions.
+
+    The echo goes through a single-quoted ``printf`` argument rather than
+    ``echo "..."``. The argv is quoted shell full of quotes, ``$``, and
+    ``$(...)``; inside a double-quoted string the quoting flips halfway
+    through and the outer shell starts expanding and running pieces of the
+    command it was only meant to display -- which broke the whole script.
     """
     inner = " ".join(
         shlex.quote(part)
         for part in rez_argv(packages, command, roots=roots, notes=notes)
+    )
+    shown = " ".join(
+        shlex.quote(part)
+        for part in rez_argv(packages, command, show_info=False)
     )
     hold = config.HOLD_TERMINAL
 
@@ -390,12 +426,12 @@ def build_script(
 
     condition = 'true' if hold == "always" else '[ "$rc" -ne 0 ]'
     return (
-        'echo "+ {inner}"; echo; '
+        "printf '+ %s\\n\\n' {shown}; "
         "{inner}; rc=$?; "
         'if {condition}; then echo; '
         'echo "BootyCall: command exited with status $rc"; '
         'read -r -p "Press Enter to close this window... " _; fi'
-    ).format(inner=inner, condition=condition)
+    ).format(inner=inner, shown=shlex.quote(shown), condition=condition)
 
 
 def expand(
@@ -441,9 +477,13 @@ def build_command(
     return expand(config.LAUNCH_COMMAND, packages, command, roots, notes)
 
 
-def build_terminal_command(packages: Sequence[str]) -> list[str]:
+def build_terminal_command(
+    packages: Sequence[str],
+    roots: Sequence[tuple[str, str]] = (),
+    notes: Sequence[tuple[str, str]] = (),
+) -> list[str]:
     """Argv that resolves ``packages`` and leaves an interactive shell."""
-    return expand(config.TERMINAL_COMMAND, packages)
+    return expand(config.TERMINAL_COMMAND, packages, "", roots, notes)
 
 
 def _preview(project: Project, argv: Sequence[str]) -> str:
@@ -464,9 +504,14 @@ def command_preview(
     return _preview(project, build_command(packages, command, roots, notes))
 
 
-def terminal_preview(project: Project, packages: Sequence[str]) -> str:
+def terminal_preview(
+    project: Project,
+    packages: Sequence[str],
+    roots: Sequence[tuple[str, str]] = (),
+    notes: Sequence[tuple[str, str]] = (),
+) -> str:
     """A copy-pasteable representation of what :func:`open_terminal` will run."""
-    return _preview(project, build_terminal_command(packages))
+    return _preview(project, build_terminal_command(packages, roots, notes))
 
 
 def launch(
@@ -495,11 +540,13 @@ def open_terminal(
     exclude_roots: Sequence[str] = (),
     include_roots: Sequence[str] = (),
     dry_run: bool = False,
+    roots: Sequence[tuple[str, str]] = (),
+    notes: Sequence[tuple[str, str]] = (),
 ) -> subprocess.Popen | None:
     """Open a shell resolved against ``packages``, detached."""
     return _spawn(
         project,
-        build_terminal_command(packages),
+        build_terminal_command(packages, roots, notes),
         exclude_roots,
         include_roots,
         dry_run,
