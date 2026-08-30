@@ -10,6 +10,17 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.5.4
+
+- **Compact keeps its title bar**, titled `B.C.` — short enough that a bar the
+  width of one tile shows all of it, where "BootyCall 0.5.4" was truncated and an
+  empty title had the window manager substituting the application name. The
+  frameless experiment and the drag-anywhere it needed are both gone.
+- **Collapsing holds the corner the window is nearest.** Qt resizes about the
+  top-left, so a launcher parked bottom-right used to skate up and left away from
+  where it was put. It now keeps whichever corner it is closest to, and expanding
+  grows back out of that same corner, clamped so it cannot grow off the screen.
+
 ## 0.5.3
 
 **BootyCall now works out which copy of a package rez will actually choose**, and

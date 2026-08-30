@@ -195,6 +195,10 @@ class MainWindow(QMainWindow):
     def __init__(self, store: ConfigStore | None = None) -> None:
         super().__init__()
         self.EXPANDED_TITLE = "BootyCall %s" % __version__
+        #: Short enough that a title bar the width of one tile can show all
+        #: of it. An elided title reads like a fault; an abbreviation does
+        #: not.
+        self.COMPACT_TITLE = "B.C."
         self.setWindowTitle(self.EXPANDED_TITLE)
         self.resize(705, 680)
         # 428 rather than 570: the window has to be parkable beside a DCC,
@@ -208,8 +212,6 @@ class MainWindow(QMainWindow):
         self._preferred_dcc: str | None = None
         self._active_dcc: config.Dcc | None = None
         self._compact = False
-        #: Where the pointer grabbed the window, while dragging it.
-        self._drag_from = None
         self._expanded_size = None
         self._expanded_minimum = None
         self._local_packages: list[LocalPackage] = []
@@ -2125,6 +2127,12 @@ class MainWindow(QMainWindow):
         if compact == self._compact:
             return
 
+        # Where the window is *now*, before anything below resizes it or
+        # recreates the native window. Reading this later means measuring the
+        # result of the collapse rather than the thing being collapsed.
+        anchor = self._nearest_corner()
+        before = self.frameGeometry()
+
         if compact:
             self._expanded_size = self.size()
             self._expanded_minimum = self.minimumSize()
@@ -2154,7 +2162,7 @@ class MainWindow(QMainWindow):
         self.menuBar().setVisible(not compact)
         self.statusBar().setVisible(not compact)
         # No title bar text: compact is a button, not a window you manage.
-        self.setWindowTitle("" if compact else self.EXPANDED_TITLE)
+        self.setWindowTitle(self.COMPACT_TITLE if compact else self.EXPANDED_TITLE)
         if self.status_label.text():
             self.status_label.setVisible(not compact)
 
@@ -2213,6 +2221,56 @@ class MainWindow(QMainWindow):
             self.setMinimumSize(self._expanded_minimum)
             self.resize(self._expanded_size)
 
+        self._keep_corner(before, anchor)
+
+    def _nearest_corner(self) -> tuple[str, str]:
+        """Which corner of the screen this window is sitting in.
+
+        Returned as ``(horizontal, vertical)`` from the window's centre against
+        the screen's, which is the reading that matches what people mean: a
+        window mostly over on the right belongs to the right-hand corners even
+        if its left edge is past the middle.
+        """
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            return ("left", "top")
+        available = screen.availableGeometry()
+        centre = self.frameGeometry().center()
+        return (
+            "right" if centre.x() > available.center().x() else "left",
+            "bottom" if centre.y() > available.center().y() else "top",
+        )
+
+    def _keep_corner(self, before, anchor: tuple[str, str]) -> None:
+        """Resize about ``anchor`` rather than about the top-left.
+
+        Qt grows and shrinks a window from its top-left, so collapsing a
+        launcher parked in the bottom-right corner of the screen sends it
+        skating up and to the left, away from where it was put. Holding the
+        nearest corner still means the thing stays where you left it, and
+        expanding grows back out of the same corner rather than off the screen.
+        """
+        horizontal, vertical = anchor
+        after = self.frameGeometry()
+
+        x = before.right() - after.width() + 1 if horizontal == "right" else before.left()
+        y = (
+            before.bottom() - after.height() + 1
+            if vertical == "bottom"
+            else before.top()
+        )
+
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is not None:
+            # Anchoring must not push the window off the edge it was anchored
+            # to -- an expanded window that grows past the top of the screen has
+            # a title bar you cannot reach.
+            available = screen.availableGeometry()
+            x = max(available.left(), min(x, available.right() - after.width() + 1))
+            y = max(available.top(), min(y, available.bottom() - after.height() + 1))
+
+        self.move(x, y)
+
     def _apply_window_hints(self) -> None:
         """Compact is a always-on-top, every-workspace launcher bar.
 
@@ -2220,36 +2278,12 @@ class MainWindow(QMainWindow):
         that refuses to go behind anything is a nuisance, not a feature.
         """
         platform_hints.set_always_on_top(self, self._compact)
-        # Decoration off before the sticky call: setting a window flag
-        # recreates the native window, which would throw away the X11 property
-        # the sticky helper just set.
-        platform_hints.set_frameless(self, self._compact)
         note = platform_hints.set_visible_on_all_workspaces(self, self._compact)
         if self._compact and note:
             # Worth saying once, not worth blocking on.
             self.compact_button.setToolTip(
                 "Back to the full window (Ctrl+M)\n\nNote: %s" % note
             )
-
-    def mousePressEvent(self, event) -> None:
-        """Start a drag. Only in compact -- expanded has a title bar to grab."""
-        if self._compact and event.button() == Qt.LeftButton:
-            self._drag_from = (
-                event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            )
-        else:
-            self._drag_from = None
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event) -> None:
-        if self._drag_from is not None and event.buttons() & Qt.LeftButton:
-            self.move(event.globalPosition().toPoint() - self._drag_from)
-            return
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event) -> None:
-        self._drag_from = None
-        super().mouseReleaseEvent(event)
 
     def _apply_compact_filter(self) -> None:
         """Show only the selected chip and tile while compact, as labels.

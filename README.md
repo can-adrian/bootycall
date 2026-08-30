@@ -574,6 +574,17 @@ The menu bar and status bar are hidden too. Everything they hold is reachable
 again one click away, and leaving them visible would have made "compact" a
 half-measure.
 
+Collapsing holds the corner the window is nearest, judged from its centre
+against the screen's. Qt resizes about the top-left, so a launcher parked in the
+bottom-right corner used to skate up and to the left, away from where it was
+put; now that corner stays where it is and the window shrinks towards it.
+Expanding grows back out of the same corner, clamped to the screen so a window
+can't grow its title bar off the top.
+
+The title bar stays, titled `B.C.` — short enough for a bar one tile wide.
+Clearing it entirely doesn't work: most window managers fall back to the
+application name and draw a bar around that instead.
+
 ### Staying put
 
 Compact mode asks the window manager for two things, and drops both when you

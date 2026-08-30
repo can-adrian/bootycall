@@ -990,7 +990,7 @@ check("package sections hidden", not window.resolve_frame.isVisible() and not wi
 check("the menu bar is hidden, and Copy command with it", not window.menuBar().isVisible())
 check("terminal hidden", not window.terminal_button.isVisible())
 check("menu bar hidden", not window.menuBar().isVisible())
-check("window title cleared", window.windowTitle() == "", window.windowTitle())
+check("window title shortened to fit", window.windowTitle() == "B.C.", window.windowTitle())
 check(
     "the tile does not respond to clicks",
     window._dcc_buttons["nuke"].testAttribute(Qt.WA_TransparentForMouseEvents),
@@ -2124,22 +2124,98 @@ check(
     "%d in %d" % (_bottom, window.dcc_container.height()),
 )
 
-print("\ncompact has no title bar to truncate a title in")
+print("\ncompact keeps its title bar, with a title that fits in it")
 window.set_compact(True)
 QApplication.processEvents()
-check("the title is cleared", window.windowTitle() == "", window.windowTitle())
+check("shortened, not cleared", window.windowTitle() == "B.C.", window.windowTitle())
 check(
-    "and the decoration is gone, so nothing draws one of its own",
-    bool(window.windowFlags() & Qt.FramelessWindowHint),
+    "short enough that a one-tile-wide bar can show all of it",
+    len(window.windowTitle()) <= 6,
+    window.windowTitle(),
 )
-check("dragging is armed only there", hasattr(window, "_drag_from"))
+check(
+    "and the frame is still there to drag and close by",
+    not (window.windowFlags() & Qt.FramelessWindowHint),
+)
 window.set_compact(False)
 QApplication.processEvents()
-check("expanding puts the frame back", not (window.windowFlags() & Qt.FramelessWindowHint))
 check(
-    "and the title with it",
+    "expanding puts the full title back",
     window.windowTitle() == window.EXPANDED_TITLE,
     window.windowTitle(),
+)
+
+print("\ncollapsing holds the corner it is nearest")
+_screen = QApplication.primaryScreen().availableGeometry()
+
+
+def _collapse_from(corner):
+    """Park the expanded window fully inside ``corner``, then collapse it.
+
+    Placed from the window's real expanded size rather than a guess: a frame
+    hanging off the edge of the screen gets clamped back on, and then the test
+    is measuring the clamp instead of the anchoring.
+    """
+    window.set_compact(False)
+    for _ in range(3):
+        QApplication.processEvents()
+    frame = window.frameGeometry()
+    x = (
+        _screen.right() - frame.width() - 20
+        if corner[0] == "right"
+        else _screen.left() + 20
+    )
+    y = (
+        _screen.bottom() - frame.height() - 20
+        if corner[1] == "bottom"
+        else _screen.top() + 20
+    )
+    window.move(x, y)
+    for _ in range(3):
+        QApplication.processEvents()
+    before = window.frameGeometry()
+    window.set_compact(True)
+    for _ in range(3):
+        QApplication.processEvents()
+    return before, window.frameGeometry()
+
+
+_before, _after = _collapse_from(("left", "top"))
+check(
+    "top-left stays put by its top-left",
+    abs(_after.left() - _before.left()) <= 2 and abs(_after.top() - _before.top()) <= 2,
+    "%s -> %s" % (_before, _after),
+)
+
+_before, _after = _collapse_from(("right", "bottom"))
+check(
+    "bottom-right collapses towards the bottom-right",
+    abs(_after.right() - _before.right()) <= 2
+    and abs(_after.bottom() - _before.bottom()) <= 2,
+    "%s -> %s" % (_before, _after),
+)
+check(
+    "which is not where it would have landed before",
+    _after.left() > _before.left() and _after.top() > _before.top(),
+    "%s -> %s" % (_before, _after),
+)
+
+print("\nand expanding grows back out of the same corner")
+_compact_frame = window.frameGeometry()
+window.set_compact(False)
+for _ in range(3):
+    QApplication.processEvents()
+_expanded = window.frameGeometry()
+check(
+    "the bottom-right corner did not move",
+    abs(_expanded.right() - _compact_frame.right()) <= 2
+    and abs(_expanded.bottom() - _compact_frame.bottom()) <= 2,
+    "%s -> %s" % (_compact_frame, _expanded),
+)
+check(
+    "so it grew up and to the left, staying on screen",
+    _expanded.left() >= _screen.left() and _expanded.top() >= _screen.top(),
+    "%s in %s" % (_expanded, _screen),
 )
 
 print("\ndiagnostics, for when a package is not where you expect it")
