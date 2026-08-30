@@ -10,6 +10,26 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.5.3
+
+**BootyCall now works out which copy of a package rez will actually choose**, and
+says so, instead of calling everything in your roots an override.
+
+rez takes the highest version satisfying the request from anywhere on the path;
+path order only settles ties between equal versions. So a dev build sitting
+first on the path, correctly installed, correctly named, can still lose to a
+newer studio build of the same name — which is exactly what a real diagnostics
+report showed: `rig_utils-1.7.666` in the dev root against a request of
+`rig_utils-1`, with a higher `1.x` in a studio root.
+
+- Lists now read **`outranked by 1.9.0`** for a build that loses, in grey,
+  instead of an amber `overrides` it does not do.
+- Diagnostics marks the winner with `>>>` and the loser with `***`, naming the
+  version and the root that beat it.
+- `resolves_to()` does the scan across every root on the path. It is a directory
+  scan, so it answers "which version is highest", not "what will the full
+  resolve do" — it does not evaluate variants or a package's own requires.
+
 ## 0.5.2
 
 - **Background is `#0c1927`.** The whole surface ladder scaled proportionally, so

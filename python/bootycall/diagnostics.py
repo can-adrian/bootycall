@@ -25,6 +25,7 @@ from .local_packages import (
     definition_fields,
     definition_mismatch,
     request_name,
+    resolves_to,
     satisfies,
 )
 
@@ -42,6 +43,7 @@ def package_report(
     requests: Sequence[str],
     root: Path | str,
     on_path: bool,
+    all_roots: Sequence[str] = (),
 ) -> list[str]:
     """One root's worth of findings, in the order they stop a package working."""
     lines = ["  root: %s" % root]
@@ -84,9 +86,23 @@ def package_report(
                 "    that request form is not one BootyCall decides; no claim made"
             )
         else:
+            lines.append("    version satisfies it, so it is a candidate")
+
+        # The question every one of these is really asking.
+        winner = resolves_to(package.name, request, all_roots) if all_roots else None
+        if winner is None:
+            continue
+        if str(winner.root) == str(root) and winner.version == package.version:
+            lines.append("    >>> and it wins: this is what the resolve will use")
+        else:
             lines.append(
-                "    version satisfies it, so this is a candidate - rez still "
-                "picks the highest version satisfying it across every root"
+                "    *** but rez will use %s from %s"
+                % (winner.version or "the unversioned build", winner.root)
+            )
+            lines.append(
+                "        (highest version satisfying the request wins, wherever "
+                "it is - path order\n         only settles ties between equal "
+                "versions)"
             )
     return lines
 
@@ -153,7 +169,13 @@ def report(window) -> str:
     dev_on_path = os.path.normpath(str(dev_root_path)) in effective or (
         view is not None and os.path.normpath(str(view)) in effective
     )
-    lines.extend(package_report(window.enabled_dev_packages(), requests, dev_root_path, dev_on_path))
+    all_roots = paths or known
+    lines.extend(
+        package_report(
+            window.enabled_dev_packages(), requests, dev_root_path, dev_on_path,
+            all_roots,
+        )
+    )
     if view is not None:
         lines.append("")
         lines.append(
@@ -171,6 +193,7 @@ def report(window) -> str:
             local_root_path,
             os.path.normpath(str(local_root_path))
             in {os.path.normpath(p) for p in paths or known},
+            all_roots,
         )
     )
 
@@ -195,10 +218,9 @@ def report(window) -> str:
 
     lines.append("")
     lines.append(
-        "If a package above is in a root marked 'on the path: yes', has no "
-        "*** line,\nand the show asks for it, then rez is choosing a higher "
-        "version of the same\nname from another root. Compare with: rez-search "
-        "<name> --paths <root>"
+        "Lines marked >>> are what the resolve will actually use. Lines marked "
+        "***\nexplain what is happening instead. A package with neither is not "
+        "named by\nthis show's package list, so it changes nothing here."
     )
     return "\n".join(lines)
 

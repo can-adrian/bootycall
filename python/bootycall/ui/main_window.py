@@ -59,6 +59,7 @@ from ..local_packages import (
     dev_working_root,
     list_local_packages,
     local_root,
+    resolves_to,
     shadowed_requests,
 )
 from ..parser import Bootstrap
@@ -167,6 +168,29 @@ def _badge(letter: str, color: str, size: int = 26) -> QPixmap:
     )
 
 
+def _same_root(root, package_path) -> bool:
+    """Is ``package_path`` inside ``root``? Both may be str or Path."""
+    if not package_path:
+        return False
+    try:
+        return str(root) in str(Path(package_path).parents[1]) or str(
+            Path(package_path)
+        ).startswith(str(root) + os.sep)
+    except IndexError:
+        return str(package_path).startswith(str(root) + os.sep)
+
+
+def package_version_of(item) -> str:
+    """The version out of a list row's request text (``nuke_utils-4.9.0``)."""
+    text = item.data(_PACKAGE_NAME_ROLE) or ""
+    path = item.data(_PACKAGE_PATH_ROLE) or ""
+    if not path:
+        return ""
+    leaf = Path(path).name
+    # An unversioned package's directory is the name itself.
+    return "" if leaf == text else leaf
+
+
 class MainWindow(QMainWindow):
     def __init__(self, store: ConfigStore | None = None) -> None:
         super().__init__()
@@ -202,6 +226,9 @@ class MainWindow(QMainWindow):
         #: The one width every tile in the row is set to. Recomputed
         #: whenever the row changes, since the labels in it change with it.
         self._tile_width = DCC_TILE_MIN_WIDTH
+        #: (name, request) -> which root wins it. Cleared on every refresh,
+        #: since it is a directory scan of every root on the path.
+        self._winner_cache: dict = {}
         self.store = store if store is not None else ConfigStore()
         # Before anything reads a path: the stored settings are the outermost
         # layer, and reload_projects() fires as soon as the window is up.
@@ -1421,6 +1448,22 @@ class MainWindow(QMainWindow):
 
     # -- package context menu ----------------------------------------------
 
+    def effective_packages_path(self) -> list[str]:
+        """Every root this launch will read, in order."""
+        paths, _note = launcher.filtered_packages_path(
+            self.excluded_roots(), self.included_roots()
+        )
+        return paths or launcher.packages_path()
+
+    def _winner_for(self, name: str, request: str):
+        """Which root rez will take ``request`` from, cached for this refresh."""
+        key = (name, request)
+        if key in self._winner_cache:
+            return self._winner_cache[key]
+        winner = resolves_to(name, request, self.effective_packages_path())
+        self._winner_cache[key] = winner
+        return winner
+
     def _root_unknown_to_rez(self, root) -> bool:
         """Is ``root`` somewhere rez's own configuration never looks?"""
         known = {os.path.normpath(p) for p in launcher.packages_path()}
@@ -1602,6 +1645,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_override_marks(self) -> None:
         """Flag packages in either root that shadow the current resolve."""
+        self._winner_cache = {}
         tool = self._current_tool()
         requests = ()
         if self._bootstrap is not None and tool:
@@ -1647,17 +1691,44 @@ class MainWindow(QMainWindow):
                         % (item.toolTip().split("\n")[0], shadow.request)
                     )
                 elif shadow is not None and first:
-                    item.setText("%s      overrides %s" % (base, shadow.request))
-                    item.setForeground(QColor("#e0a23c"))
-                    item.setToolTip(
-                        "%s\nHighest version of '%s' in this root, and it "
-                        "satisfies the show's '%s'.\n\nrez still picks the "
-                        "highest version satisfying that request across every "
-                        "package path, so a newer studio build of the same name "
-                        "would win - path order only settles ties between equal "
-                        "versions."
-                        % (item.toolTip().split("\n")[0], name, shadow.request)
-                    )
+                    winner = self._winner_for(name, shadow.request)
+                    mine = winner is not None and _same_root(
+                        winner.root, item.data(_PACKAGE_PATH_ROLE)
+                    ) and winner.version == package_version_of(item)
+
+                    if winner is not None and not mine:
+                        # The whole point of the list is to say what will be in
+                        # the environment. A build that loses to a newer one
+                        # elsewhere is not overriding anything, and calling it
+                        # an override is how you spend an afternoon wondering
+                        # why your change is not there.
+                        item.setText(
+                            "%s      outranked by %s"
+                            % (base, winner.version or "another build")
+                        )
+                        item.setForeground(QColor("#90a8c2"))
+                        item.setToolTip(
+                            "%s\nThe show asks for '%s'. rez takes the highest "
+                            "version satisfying that across every package path, "
+                            "and that is %s in\n%s\n\nPath order only settles "
+                            "ties between equal versions - being earlier does "
+                            "not beat a higher version."
+                            % (
+                                item.toolTip().split("\n")[0],
+                                shadow.request,
+                                winner.version or "an unversioned build",
+                                winner.root,
+                            )
+                        )
+                    else:
+                        item.setText("%s      overrides %s" % (base, shadow.request))
+                        item.setForeground(QColor("#e0a23c"))
+                        item.setToolTip(
+                            "%s\nThe highest version of '%s' satisfying the "
+                            "show's '%s' anywhere on the packages path, so this "
+                            "is the one the resolve gets."
+                            % (item.toolTip().split("\n")[0], name, shadow.request)
+                        )
                 elif shadow is not None:
                     item.setText("%s      (older build)" % base)
                     item.setForeground(QColor("#90a8c2"))

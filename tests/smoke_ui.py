@@ -2172,6 +2172,98 @@ check(
     str([a.text() for a in window.edit_menu.actions()]),
 )
 
+print("\na build that loses to a newer one elsewhere says so")
+_pr = Path(tempfile.mkdtemp(prefix="bootycall-precedence-"))
+_pr_shows, _pr_local, _pr_studio = _pr / "shows", _pr / "local", _pr / "studio"
+(_pr_shows / "demo" / ".ilp" / "pipeline").mkdir(parents=True)
+(_pr_shows / "demo" / ".ilp" / "pipeline" / "config.py").write_text(
+    "from ilp_bootstrap import Bootstrap\n"
+    "class ProjectBootstrap(Bootstrap):\n"
+    "    packages = dict(maya=('maya-2026', 'rig_utils-1'))\n"
+)
+
+
+def _put(root, name, version):
+    d = root / name / version
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "package.py").write_text("name = %r\nversion = %r\n" % (name, version))
+
+
+_put(_pr_local / "dev", "rig_utils", "1.7.666")
+_put(_pr_studio, "rig_utils", "1.9.0")
+
+_saved_rez = os.environ.get("REZ_PACKAGES_PATH")
+os.environ["REZ_PACKAGES_PATH"] = str(_pr_studio)
+launcher._PACKAGES_PATH = None
+cfg_mod.set_path_overrides(
+    {
+        "shows_root": str(_pr_shows),
+        "local_root": str(_pr_local),
+        "dev_root": "{local}/dev",
+    }
+)
+window.reload_projects()
+QApplication.processEvents()
+unpin_all()
+pin("demo")
+window.dev_frame.set_expanded(True)
+QApplication.processEvents()
+
+_rows = [window.dev_list.item(i).text() for i in range(window.dev_list.count())]
+check("the dev build is listed", any("rig_utils" in r for r in _rows), str(_rows))
+check(
+    "and it is not called an override, because it does not win",
+    all("overrides" not in r for r in _rows),
+    str(_rows),
+)
+check(
+    "it names the version that beats it",
+    any("outranked by 1.9.0" in r for r in _rows),
+    str(_rows),
+)
+
+_win = window._winner_for("rig_utils", "rig_utils-1")
+check(
+    "and the resolver agrees where it comes from",
+    _win is not None and str(_win.root) == str(_pr_studio),
+    _win.describe() if _win else "no winner",
+)
+
+_report = _diag.report(window)
+check(
+    "the report spells it out",
+    "but rez will use 1.9.0" in _report,
+    "\n".join(l for l in _report.splitlines() if "rig_utils" in l),
+)
+
+print("\nnarrow the request and the same build wins")
+(_pr_shows / "demo" / ".ilp" / "pipeline" / "config.py").write_text(
+    "from ilp_bootstrap import Bootstrap\n"
+    "class ProjectBootstrap(Bootstrap):\n"
+    "    packages = dict(maya=('maya-2026', 'rig_utils-1.7'))\n"
+)
+unpin_all()
+pin("demo")
+window.dev_frame.set_expanded(True)
+QApplication.processEvents()
+_rows = [window.dev_list.item(i).text() for i in range(window.dev_list.count())]
+check(
+    "now it is the override",
+    any("overrides rig_utils-1.7" in r for r in _rows),
+    str(_rows),
+)
+
+cfg_mod.set_path_overrides({})
+if _saved_rez:
+    os.environ["REZ_PACKAGES_PATH"] = _saved_rez
+else:
+    os.environ.pop("REZ_PACKAGES_PATH", None)
+launcher._PACKAGES_PATH = None
+window.reload_projects()
+QApplication.processEvents()
+unpin_all()
+pin("batman_returns")
+
 print("\nfavourites window")
 from bootycall.configs import SavedConfig as _SC  # noqa: E402
 from bootycall.ui.config_menu import ConfigMenuAction  # noqa: E402

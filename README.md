@@ -193,12 +193,18 @@ twice. Those rows read *does not satisfy nuke_utils-4.10* in red and are not
 counted as in use. Prefix ranges (`nuke-16.0`) and lower bounds (`python-3+`)
 are decided; anything more complex makes no claim rather than a wrong one.
 
-Even then it is only a candidate. **rez picks the highest version satisfying the
-request across every package path** — path order settles ties between equal
-versions, it does not beat a higher one. A studio `nuke_utils-4.12` still wins
-over your `4.10`, however early your root sits. BootyCall cannot see the studio
-versions without asking rez, so it says "overrides" and the tooltip says the
-rest.
+**And it has to be the highest version anywhere.** rez picks the highest version
+satisfying the request across every package path; path order settles ties
+between equal versions, it does not beat a higher one. A studio
+`rig_utils-1.9.0` wins over your `rig_utils-1.7.666` however early your root
+sits — and a `.666` patch number only helps inside the version it patches.
+
+BootyCall scans every root on the path and says which one wins. A build that
+loses reads **`outranked by 1.9.0`** in grey rather than an amber `overrides`,
+and the tooltip names the root it lost to. That scan answers "which version is
+highest", not "what will the full resolve do": it does not evaluate variants or
+a package's own requires, so a resolve can still reject a version for reasons no
+directory listing shows.
 
 ### When a package is not where you expect it
 

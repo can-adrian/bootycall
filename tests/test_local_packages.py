@@ -314,6 +314,63 @@ check(
     lp.definition_mismatch(_unversioned),
 )
 
+print("\nwhich copy rez will actually choose")
+_roots = Path(tempfile.mkdtemp(prefix="bootycall-roots-"))
+_dev, _studio, _other = _roots / "dev", _roots / "studio", _roots / "other"
+
+
+def _put(root, name, version):
+    d = root / name / version if version else root / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "package.py").write_text("name = %r\nversion = %r\n" % (name, version))
+
+
+_put(_dev, "rig_utils", "1.7.666")
+_put(_studio, "rig_utils", "1.9.0")
+_put(_studio, "rig_utils", "2.0.0")
+_put(_other, "solo", "")
+
+check(
+    "a root's versions are listed",
+    sorted(lp.versions_in(_studio, "rig_utils")) == ["1.9.0", "2.0.0"],
+    str(lp.versions_in(_studio, "rig_utils")),
+)
+check("an unversioned package reports itself", lp.versions_in(_other, "solo") == [""])
+check("a name that is not there is empty", lp.versions_in(_studio, "nothing") == [])
+
+_order = [str(_dev), str(_studio)]
+_win = lp.resolves_to("rig_utils", "rig_utils-1", _order)
+check(
+    "being first on the path does not beat a higher version",
+    _win.version == "1.9.0" and str(_win.root) == str(_studio),
+    _win.describe(),
+)
+check(
+    "and 2.0.0 is out of range for a request of 1",
+    _win.version == "1.9.0",
+    _win.describe(),
+)
+
+_win = lp.resolves_to("rig_utils", "rig_utils-1.7", _order)
+check(
+    "narrowing the request to 1.7 is what lets the dev build win",
+    _win.version == "1.7.666" and str(_win.root) == str(_dev),
+    _win.describe(),
+)
+
+_put(_dev, "rig_utils", "1.9.0")
+_win = lp.resolves_to("rig_utils", "rig_utils-1", _order)
+check(
+    "an equal version is settled by path order, and only then",
+    _win.version == "1.9.0" and str(_win.root) == str(_dev),
+    _win.describe(),
+)
+
+check(
+    "a name in no root at all has no winner",
+    lp.resolves_to("absent", "absent-1", _order) is None,
+)
+
 print("\nmissing root is not an error")
 missing = Path(tempfile.mkdtemp(prefix="bootycall-local-")) / "nope" / "dev"
 check("empty list", lp.list_local_packages(missing) == [])

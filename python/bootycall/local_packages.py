@@ -197,6 +197,66 @@ def list_local_packages(
     return regrouped
 
 
+def versions_in(root: Path | str, name: str) -> list[str]:
+    """Versions of ``name`` present under one package root.
+
+    A directory scan, not a resolve: enough to answer "what does this root
+    offer for this package", which is the question BootyCall needs and the one
+    rez would answer the same way. An unversioned package yields ``[""]``.
+    """
+    family = Path(root) / name
+    definition = _definition_in(family)
+    if definition:
+        return [""]
+
+    found = []
+    for entry in _subdirs(family):
+        if _definition_in(entry):
+            found.append(entry.name)
+    return found
+
+
+@dataclass(frozen=True)
+class Winner:
+    """Which copy of a package rez will actually choose, and from where."""
+
+    name: str
+    request: str
+    version: str
+    root: Path
+
+    def describe(self) -> str:
+        return "%s-%s from %s" % (self.name, self.version, self.root) if self.version else "%s from %s" % (self.name, self.root)
+
+
+def resolves_to(name: str, request: str, roots: Sequence[str]) -> Winner | None:
+    """Which root wins ``request``, following rez's own rule.
+
+    rez gathers every version of a package from every root on the path and
+    takes the **highest one that satisfies the request**. Path order is only a
+    tie-break between identical versions -- it does not let an earlier root
+    beat a higher version in a later one.
+
+    That rule is the whole reason a dev build can sit first on the path, marked
+    as overriding, and still lose: the studio ships a newer version of the same
+    name. Being able to say so is the difference between "your package is a
+    candidate" and "your 1.7.666 loses to 1.9.0 in /ice/rez/packages/manual".
+
+    A directory scan cannot see everything rez does -- it does not evaluate
+    variants or a package's own requires, and a resolve can reject a version
+    for reasons no listing shows. So this answers "which version is highest",
+    which is the question that explains almost every case, and no more.
+    """
+    best: Winner | None = None
+    for root in roots:
+        for version in versions_in(root, name):
+            if satisfies(version, request) is False:
+                continue
+            if best is None or version_key(version) > version_key(best.version):
+                best = Winner(name=name, request=request, version=version, root=Path(root))
+    return best
+
+
 def definition_fields(path: Path | str) -> dict[str, str]:
     """``name`` and ``version`` as the package definition itself declares them.
 
