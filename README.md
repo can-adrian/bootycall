@@ -226,8 +226,8 @@ sits — and a `.666` patch number only helps inside the version it patches.
 
 **Everything above is a prediction.** BootyCall scans every root on the path and
 says which one wins. A build that
-loses reads **`outranked by 1.9.0`** in grey rather than an amber `overrides`,
-and the tooltip names the root it lost to. That scan answers "which version is
+loses reads **`outranked by 1.9.0`** in red rather than an amber `overrides`.
+That scan answers "which version is
 highest", not "what will the full resolve do": it does not evaluate variants or
 a package's own requires, so a resolve can still reject a version for reasons no
 directory listing shows.
@@ -378,9 +378,8 @@ request is flagged amber in the resolve **and names which root** it came from,
 and the package that wins is flagged in that root's list.
 
 When a package is in **both** roots, the resolve says `overridden by your local
-and dev builds` and the tooltip adds that which one wins depends on your
-`REZ_PACKAGES_PATH` order — BootyCall can't see that, so it names both rather
-than picking one and being wrong half the time.
+and dev builds` — naming both rather than picking one, because which of them
+wins depends on your `REZ_PACKAGES_PATH` order and BootyCall cannot see it.
 
 Only the **highest** version of a name *within a root* is marked as winning —
 rez resolves the highest version satisfying the request, so marking all three of
@@ -398,19 +397,27 @@ people have never made a package in one, and the section just says so.
 
 ### Built or linked
 
-A symlinked install reads `(symlinked)` beside its name, with the working copy's
-path on the tooltip. The distinction matters in three places: edits to a linked
+A symlinked install reads *(symlinked)* beside its name. The distinction
+matters in three places: edits to a linked
 package are live in the next resolve, a linked package can never be stale, and
 deleting one removes the link while leaving the working copy alone.
 
 ### Deleting a package
 
 Right-click a row in either list for **Browse folder**, **Copy path** and
-**Delete from disk**. Browse opens the package directory in the desktop file
-manager, stopping at five at once rather than carpeting the desktop.
-Multi-select works; right-clicking outside the selection targets the row you
-clicked, as lists normally do. Deleting asks first, lists the exact paths, and
-defaults to No.
+**Remove Dev Package** / **Remove Local Package** — named for the section it
+acts on, because which of the two roots is about to lose a package is the only
+thing worth knowing before you press it. Browse opens the package directory in
+the desktop file manager, stopping at five at once rather than carpeting the
+desktop. Multi-select works; right-clicking outside the selection targets the
+row you clicked, as lists normally do. Removing asks first, lists the exact
+paths, says when one of them is a link that will leave its working copy alone,
+and defaults to No.
+
+**Package rows carry no tooltips.** They used to explain, on hover, what the
+row already said in words — and the one thing a tooltip was genuinely carrying,
+that removing a link leaves the working copy alone, now appears in the
+confirmation dialog, which is where it is actually needed.
 
 `delete_package()` guards the two ways this could go badly wrong rather than
 trusting the caller:

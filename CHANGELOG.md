@@ -10,6 +10,26 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.11.1
+
+Patch: less hovering, clearer menu.
+
+- **Package rows carry no tooltips.** All three lists. They restated what the
+  row already said in words, and a popup that appears whenever the pointer
+  crosses a list is a cost paid on every glance for information you asked for
+  once.
+
+  One thing they carried was worth keeping: that removing a symlinked install
+  takes the link and leaves the working copy alone. That now appears in the
+  confirmation dialog, which is where it is needed — before the button, not
+  while browsing.
+
+- **"Delete from disk" is now "Remove Dev Package" / "Remove Local Package"**,
+  named for the list it was opened from. The old label was accurate and said
+  nothing about which of the two roots was about to lose a package, which is
+  the only thing worth knowing before pressing it. The confirmation dialog is
+  titled to match.
+
 ## 0.11.0
 
 Minor: the dev section shows a different set of packages than it used to.

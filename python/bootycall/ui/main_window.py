@@ -1326,36 +1326,18 @@ class MainWindow(QMainWindow):
             duplicate = request in seen
             seen.add(request)
             item = QListWidgetItem(request)
-            tips = []
             if duplicate:
                 item.setForeground(QColor("#90a8c2"))
-                tips.append("Listed more than once in this package set")
             roots = shadowed.get(request)
             if roots:
+                # Both roots named when both have one: which wins depends on
+                # REZ_PACKAGES_PATH order at your site, which BootyCall cannot
+                # see, so naming one would be wrong half the time.
                 item.setText(
                     "%s      overridden by your %s build%s"
                     % (request, " and ".join(roots), "s" if len(roots) > 1 else "")
                 )
                 item.setForeground(QColor("#e0a23c"))
-                tips.append(
-                    "A package named '%s' exists in your %s root%s and takes "
-                    "precedence over this request."
-                    % (
-                        request.split("-", 1)[0],
-                        " and ".join(roots),
-                        "s" if len(roots) > 1 else "",
-                    )
-                )
-                if len(roots) > 1:
-                    # Which of the two wins depends on REZ_PACKAGES_PATH order
-                    # at your site, which BootyCall cannot see -- so say both
-                    # rather than pick one and be wrong half the time.
-                    tips.append(
-                        "It is in both roots; which one wins depends on your "
-                        "REZ_PACKAGES_PATH order."
-                    )
-            if tips:
-                item.setToolTip("\n".join(tips))
             self.package_list.addItem(item)
 
         show_pkg = self.show_package()
@@ -1364,17 +1346,6 @@ class MainWindow(QMainWindow):
             # to say so.
             item = QListWidgetItem("%s      (show package)" % name)
             item.setForeground(QColor("#8fce8f"))
-            if show_pkg is not None and show_pkg.name == name:
-                item.setToolTip(
-                    "%s\nFound under %s, which is added to the packages path "
-                    "for the launch." % (show_pkg.path, show_pkg.root)
-                )
-            else:
-                item.setToolTip(
-                    "The bootstrap adds this to every resolve. BootyCall could "
-                    "not find it on disk, so every candidate package root is "
-                    "added to the packages path for the launch."
-                )
             self.package_list.addItem(item)
 
         duplicates = len(packages) - len(seen)
@@ -1464,11 +1435,6 @@ class MainWindow(QMainWindow):
             # is not there would be a lie the resolve then contradicts.
             item.setFlags(item.flags() & ~Qt.ItemIsUserCheckable)
             item.setCheckState(Qt.Unchecked)
-            tip = "%s\n\nIn your working location but not installed, so it is "
-            tip += "not in any resolve.\nRight-click to install or link it."
-            item.setToolTip(tip % package.path)
-            if package.problem:
-                item.setToolTip("%s\n\n%s" % (item.toolTip(), package.problem))
             listing.addItem(item)
 
         self._refresh_dev_badge(listing, installed, missing)
@@ -1526,7 +1492,6 @@ class MainWindow(QMainWindow):
             frame.set_note("")
             item = QListWidgetItem(empty_hint)
             item.setForeground(QColor("#90a8c2"))
-            item.setToolTip("Expected at %s" % root)
             listing.addItem(item)
         elif not packages:
             frame.set_badge("none")
@@ -1550,13 +1515,6 @@ class MainWindow(QMainWindow):
                 item = QListWidgetItem(display)
                 item.setData(_PACKAGE_NAME_ROLE, package.name)
                 item.setData(_PACKAGE_PATH_ROLE, str(package.path))
-                tip = "%s\n%s" % (package.path, package.definition)
-                if package.is_symlink:
-                    tip += (
-                        "\n\nA link to your working copy:\n  %s\nEdits there "
-                        "are live in the next resolve, and deleting this "
-                        "removes only the link." % package.link_target()
-                    )
 
                 # A package rez will skip is worth flagging before anything
                 # else this list says about it: an override that rez never
@@ -1565,7 +1523,6 @@ class MainWindow(QMainWindow):
                 if problem:
                     item.setText("%s      %s" % (display, problem))
                     item.setForeground(QColor("#e06c75"))
-                    tip += "\n\n%s" % problem
 
                 if tickable:
                     # Setting a check state is what puts a box on the row --
@@ -1577,11 +1534,6 @@ class MainWindow(QMainWindow):
                         if package.name in self._disabled_dev
                         else Qt.Checked
                     )
-                    tip += (
-                        "\n\nUnticked, this package is kept out of the resolve "
-                        "and the studio one is used instead."
-                    )
-                item.setToolTip(tip)
                 listing.addItem(item)
 
         return packages
@@ -1720,10 +1672,12 @@ class MainWindow(QMainWindow):
             "Copy path" if count == 1 else "Copy %d paths" % count
         )
         menu.addSeparator()
+        # Named for the section it acts on. "Delete from disk" was accurate
+        # and said nothing about which of the two roots was about to lose a
+        # package, which is the only thing worth knowing before you press it.
+        kind = self._section_noun(listing)
         delete_action = menu.addAction(
-            "Delete from disk"
-            if count == 1
-            else "Delete %d packages from disk" % count
+            "Remove %s" % kind if count == 1 else "Remove %d %ss" % (count, kind)
         )
 
         chosen = menu.exec(listing.mapToGlobal(point))
@@ -1821,6 +1775,10 @@ class MainWindow(QMainWindow):
             )
         return errors
 
+    def _section_noun(self, listing: QListWidget) -> str:
+        """What a package in this list is called, for the menu and the dialog."""
+        return "Dev Package" if listing is self.dev_list else "Local Package"
+
     def _confirm_delete_packages(
         self, listing: QListWidget, packages: list[LocalPackage]
     ) -> None:
@@ -1844,12 +1802,14 @@ class MainWindow(QMainWindow):
                 % (len(links), "is" if len(links) == 1 else "are")
             )
 
+        kind = self._section_noun(listing)
         reply = QMessageBox.warning(
             self,
-            "Delete from disk",
-            "Delete %d package%s?\n\n%s\n\n%s"
+            "Remove %s" % kind,
+            "Remove %d %s%s from disk?\n\n%s\n\n%s"
             % (
                 len(packages),
+                kind.lower(),
                 "" if len(packages) == 1 else "s",
                 "\n".join(shown),
                 note,
@@ -1936,11 +1896,6 @@ class MainWindow(QMainWindow):
                         "%s      does not satisfy %s" % (base, shadow.request)
                     )
                     item.setForeground(QColor(_ROW_LOST))
-                    item.setToolTip(
-                        "%s\nThe show asks for '%s', which this version cannot "
-                        "satisfy - rez will use the studio build instead."
-                        % (item.toolTip().split("\n")[0], shadow.request)
-                    )
                 elif shadow is not None and first:
                     winner = self._winner_for(name, shadow.request)
                     mine = winner is None or _winner_is_ours(winner, packages)
@@ -1956,28 +1911,9 @@ class MainWindow(QMainWindow):
                             % (base, winner.version or "another build")
                         )
                         item.setForeground(QColor(_ROW_LOST))
-                        item.setToolTip(
-                            "%s\nThe show asks for '%s'. rez takes the highest "
-                            "version satisfying that across every package path, "
-                            "and that is %s in\n%s\n\nPath order only settles "
-                            "ties between equal versions - being earlier does "
-                            "not beat a higher version."
-                            % (
-                                item.toolTip().split("\n")[0],
-                                shadow.request,
-                                winner.version or "an unversioned build",
-                                winner.root,
-                            )
-                        )
                     else:
                         item.setText("%s      overrides %s" % (base, shadow.request))
                         item.setForeground(QColor(_ROW_IN_USE))
-                        item.setToolTip(
-                            "%s\nThe highest version of '%s' satisfying the "
-                            "show's '%s' anywhere on the packages path, so this "
-                            "is the one the resolve gets."
-                            % (item.toolTip().split("\n")[0], name, shadow.request)
-                        )
                 elif shadow is not None:
                     item.setText("%s      (older build)" % base)
                     item.setForeground(QColor(_ROW_QUIET))

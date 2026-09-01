@@ -2847,15 +2847,43 @@ if _have_links:
         _rows["real_one"].text(),
     )
     check(
-        "and the tooltip says where it points",
-        str(_sym_src) in _rows["rig_utils"].toolTip(),
-        _rows["rig_utils"].toolTip(),
+        "no row in either list carries a tooltip",
+        not any(
+            listing.item(i).toolTip()
+            for listing in (window.dev_list, window.local_list, window.package_list)
+            for i in range(listing.count())
+        ),
+        str(
+            [
+                listing.item(i).toolTip()
+                for listing in (window.dev_list, window.local_list, window.package_list)
+                for i in range(listing.count())
+                if listing.item(i).toolTip()
+            ]
+        ),
     )
+
+    # Nothing hovers to warn you any more, so the one moment that matters --
+    # the confirmation before a delete -- has to carry it.
+    _asked = []
+    _real_warn = mw_mod.QMessageBox.warning
+    mw_mod.QMessageBox.warning = staticmethod(
+        lambda parent, title, text, *a, **k: (
+            _asked.append((title, text)),
+            mw_mod.QMessageBox.No,
+        )[1]
+    )
+    window._confirm_delete_packages(
+        window.dev_list, [p for p in window._dev_packages if p.name == "rig_utils"]
+    )
+    mw_mod.QMessageBox.warning = _real_warn
+    check("the confirmation is named for the section", _asked[0][0] == "Remove Dev Package", str(_asked[0][0]))
     check(
-        "and that deleting it only removes the link",
-        "only the link" in _rows["rig_utils"].toolTip(),
-        _rows["rig_utils"].toolTip(),
+        "and says a link loses only the link",
+        "only the link is removed" in _asked[0][1],
+        _asked[0][1],
     )
+    check("saying No changes nothing", (_sym_dev / "rig_utils").is_symlink())
 
     _pkgs = [p for p in window._dev_packages if p.name == "rig_utils"]
     _errors = window.delete_packages(window.dev_list, _pkgs)
@@ -2871,6 +2899,52 @@ if _have_links:
     cfg_mod.set_path_overrides({})
     window.refresh_package_lists()
     QApplication.processEvents()
+
+print("\nthe remove action is named for the section it acts on")
+check(
+    "dev list",
+    window._section_noun(window.dev_list) == "Dev Package",
+    window._section_noun(window.dev_list),
+)
+check(
+    "local list",
+    window._section_noun(window.local_list) == "Local Package",
+    window._section_noun(window.local_list),
+)
+
+_labels = []
+
+
+class _CollectMenu:
+    def __init__(self, *a, **k):
+        pass
+
+    def addAction(self, label):
+        _labels.append(label)
+        return label
+
+    def addSeparator(self):
+        pass
+
+    def exec(self, *a):
+        return None
+
+
+pin("batman_returns")
+QApplication.processEvents()
+_real_menu2 = mw_mod.QMenu
+mw_mod.QMenu = _CollectMenu
+_first_local = window.local_list.item(0)
+window.local_list.setCurrentItem(_first_local)
+window._on_package_menu(
+    window.local_list, window.local_list.visualItemRect(_first_local).center()
+)
+mw_mod.QMenu = _real_menu2
+check(
+    "the local list offers Remove Local Package, not 'delete from disk'",
+    "Remove Local Package" in _labels,
+    str(_labels),
+)
 
 print("\ntooltips are readable, not light-on-light")
 _style = app.styleSheet()
