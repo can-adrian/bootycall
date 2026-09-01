@@ -317,6 +317,9 @@ def resolve_report(window) -> str:
 
         lines.append("    rez resolved:      %s" % version)
         lines.append("    from:              %s" % (root or "<unknown>"))
+        link = link_in(root, window.highlight_roots())
+        if link:
+            lines.append("    a link, at:        %s -> %s" % link)
         if version == newest:
             lines.append("    >>> yours is the one in the environment")
         else:
@@ -333,8 +336,41 @@ def resolve_report(window) -> str:
     lines.append(_heading("everything rez resolved"))
     for key in sorted(probe.resolved):
         version, root = probe.resolved[key]
-        lines.append("  %-32s %-14s %s" % (key.lower(), version, root))
+        mark = "  (symlinked)" if link_in(root, window.highlight_roots()) else ""
+        lines.append("  %-32s %-14s %s%s" % (key.lower(), version, root, mark))
     return "\n".join(lines)
+
+
+def link_in(
+    root: str, highlights: Sequence[tuple[str, str]]
+) -> tuple[str, str] | None:
+    """``(link, target)`` if anything between ``root`` and one of ``highlights``
+    is a symlink.
+
+    The same walk the launch report does, in Python, so a report that says
+    ``(symlinked)`` and one that does not can be compared against the same
+    filesystem rather than against each other's reasoning.
+
+    Bounded by the highlighted root for the reason the shell version is: at a
+    site where ``/ice`` is itself a link, walking past it would call every
+    package in the studio symlinked.
+    """
+    if not root:
+        return None
+    for _label, base in highlights:
+        base_path = os.path.abspath(base)
+        here = os.path.abspath(root)
+        if not here.startswith(base_path + os.sep):
+            continue
+        while here and here != base_path and here != os.sep:
+            if os.path.islink(here):
+                try:
+                    return here, os.path.realpath(here)
+                except OSError:
+                    return here, "<unreadable>"
+            here = os.path.dirname(here)
+        return None
+    return None
 
 
 def site_summary() -> str:

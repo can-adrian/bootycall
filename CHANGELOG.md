@@ -10,6 +10,28 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.12.1
+
+Patch: find the link wherever it is, and let Diagnostics answer the question.
+
+- **The launch report checked two levels for a symlink; it now checks every
+  level down to the root the package was found under.** Which level is the
+  link depends on how it was made — the version directory for a versioned
+  install, the name directory for an unversioned one, and neither if someone
+  linked by hand somewhere else. Anything below the two it looked at read as a
+  plain build.
+
+  The walk stops at the matched root, and that boundary matters: at a site
+  where `/ice` is itself a symlink, walking past it would report every package
+  in the studio as symlinked — wrong about all of them, which is worse than
+  quiet about one.
+
+- **Diagnostics says which packages are links and where they point.** Both
+  in the per-package section and beside every row of *everything rez resolved*.
+  It walks the same tree in Python that the launch script walks in shell, and a
+  test asserts the two agree — a report and a launch that disagree about the
+  same filesystem are worth less than either alone.
+
 ## 0.12.0
 
 Minor: saved setups carry one more thing, and unticked dev builds stop going quiet.

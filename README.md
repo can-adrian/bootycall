@@ -403,8 +403,15 @@ people have never made a package in one, and the section just says so.
 
 ### Built or linked
 
-A symlinked install reads *(symlinked)* beside its name. The distinction
-matters in three places: edits to a linked
+A symlinked install reads *(symlinked)* beside its name — in the package list
+and in the launch report both. The report asks the filesystem rather than
+trusting what BootyCall thinks it installed, walking every level from the
+package root up to the root it was found under, so a link made by hand counts
+the same and it does not matter which level carries it. It stops at that root:
+where `/ice` is itself a symlink, walking further would call every package in
+the studio a link.
+
+The distinction matters in three places: edits to a linked
 package are live in the next resolve, a linked package can never be stale, and
 deleting one removes the link while leaving the working copy alone.
 

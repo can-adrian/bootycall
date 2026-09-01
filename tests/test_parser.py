@@ -541,6 +541,104 @@ check(
     _link_banner[:400],
 )
 
+print("\na link is found wherever in the tree it happens to be")
+# Which level is the link depends on how it was made: the version directory
+# for a versioned install, the name directory for an unversioned one. Only the
+# first two were checked, so anything else read as a plain build.
+_depth = Path(tempfile.mkdtemp(prefix="bootycall-depth-"))
+(_depth / "src/a").mkdir(parents=True)
+(_depth / "src/b/2.0.0").mkdir(parents=True)
+(_depth / "dev/version_link").mkdir(parents=True)
+(_depth / "dev/real/3.0.0").mkdir(parents=True)
+os.symlink(_depth / "src/a", _depth / "dev/version_link/1.0.0")
+os.symlink(_depth / "src/b", _depth / "dev/name_link")
+
+_depth_banner = launcher.launch_banner((("dev", str(_depth / "dev")),))
+_depth_env = {
+    "PATH": os.environ.get("PATH", ""),
+    "REZ_VERSION_LINK_ROOT": str(_depth / "dev/version_link/1.0.0"),
+    "REZ_VERSION_LINK_VERSION": "1.0.0",
+    "REZ_NAME_LINK_ROOT": str(_depth / "dev/name_link/2.0.0"),
+    "REZ_NAME_LINK_VERSION": "2.0.0",
+    "REZ_REAL_ROOT": str(_depth / "dev/real/3.0.0"),
+    "REZ_REAL_VERSION": "3.0.0",
+    # rez has been seen to report a root with a trailing separator.
+    "REZ_TRAIL_ROOT": str(_depth / "dev/version_link/1.0.0") + "/",
+    "REZ_TRAIL_VERSION": "1.0.0",
+}
+for _shell in ("sh", "dash", "bash"):
+    if shutil.which(_shell) is None:
+        continue
+    _seen = subprocess.run(
+        [_shell, "-c", _depth_banner], capture_output=True, text=True, env=_depth_env
+    ).stdout
+    for _label, _want in (
+        ("linked at the version directory", "version_link-1.0.0  (dev)  (symlinked)"),
+        ("linked at the name directory", "name_link-2.0.0  (dev)  (symlinked)"),
+        ("a trailing separator changes nothing", "trail-1.0.0  (dev)  (symlinked)"),
+    ):
+        check("%s: %s" % (_shell, _label), _want in _seen, _seen)
+    check(
+        "%s: and a real build is not called a link" % _shell,
+        "real-3.0.0  (dev)\n" in _seen,
+        _seen,
+    )
+
+# The walk stops at the root it matched. At a site where /ice is itself a
+# symlink, walking past it would report every package in the studio as
+# symlinked -- which is worse than missing one, because it is wrong about all
+# of them.
+_above = Path(tempfile.mkdtemp(prefix="bootycall-above-"))
+(_above / "real/rez/dev/pkg/1.0.0").mkdir(parents=True)
+os.symlink(_above / "real", _above / "linked")
+_above_out = subprocess.run(
+    ["bash", "-c", launcher.launch_banner((("dev", str(_above / "linked/rez/dev")),))],
+    capture_output=True,
+    text=True,
+    env={
+        "PATH": os.environ.get("PATH", ""),
+        "REZ_PKG_ROOT": str(_above / "linked/rez/dev/pkg/1.0.0"),
+        "REZ_PKG_VERSION": "1.0.0",
+    },
+).stdout
+check(
+    "a symlink above the package root is not this package's business",
+    "pkg-1.0.0  (dev)\n" in _above_out and "(symlinked)" not in _above_out,
+    _above_out,
+)
+
+# Diagnostics walks the same tree in Python. If the two ever disagree, the
+# report that says "(symlinked)" and the launch that does not are arguing
+# about the same filesystem, and neither can be trusted.
+from bootycall.diagnostics import link_in  # noqa: E402
+
+_highlights = (("dev", str(_depth / "dev")),)
+for _name, _root in (
+    ("version_link", _depth / "dev/version_link/1.0.0"),
+    ("name_link", _depth / "dev/name_link/2.0.0"),
+):
+    check(
+        "diagnostics agrees that %s is a link" % _name,
+        link_in(str(_root), _highlights) is not None,
+        str(link_in(str(_root), _highlights)),
+    )
+check(
+    "and agrees a real build is not",
+    link_in(str(_depth / "dev/real/3.0.0"), _highlights) is None,
+)
+check(
+    "and stops at the root, exactly as the shell does",
+    link_in(
+        str(_above / "linked/rez/dev/pkg/1.0.0"),
+        (("dev", str(_above / "linked/rez/dev")),),
+    )
+    is None,
+)
+check(
+    "a package outside every highlighted root is nobody's link",
+    link_in("/somewhere/else/entirely", _highlights) is None,
+)
+
 print("\nand it survives rez re-quoting the command")
 # rez does not run the argv it is handed. It writes the whole thing into a
 # rez-shell.sh of its own, inside double quotes, and runs that. Anything

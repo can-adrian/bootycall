@@ -312,8 +312,11 @@ def launch_banner(
         # nested inside the local one, and reversed every dev package would
         # be reported as local.
         tests = "\n".join(
-            '            if (index(p, r%d "/") == 1) { print n, l%d, p; continue }'
-            % (i, i)
+            # The matched root goes out with the line: the symlink walk below
+            # needs somewhere to stop, and "the root this package was found
+            # under" is the only honest boundary.
+            '            if (index(p, r%d "/") == 1) '
+            '{ print n, l%d, r%d, p; continue }' % (i, i, i)
             for i in range(len(roots))
         )
         # Colour per label, chosen in the shell rather than baked into awk's
@@ -350,19 +353,31 @@ def launch_banner(
             # prints as it goes rather than accumulating anything the rest of
             # the script needs.
             "    printf '%s\\n' \"$_bc_hits\" |",
-            "    while read -r _bc_name _bc_label _bc_path; do",
+            "    while read -r _bc_name _bc_label _bc_root _bc_path; do",
             "        _bc_c=$_bcG",
             '        case "$_bc_label" in',
             cases,
             "        esac",
             # Asked of the filesystem, not predicted from what BootyCall
             # thinks it installed: a link someone made by hand counts too.
-            # The version directory is the link for an installed dev package,
-            # its parent for an unversioned one.
+            #
+            # Every level between the package and the root it was found under,
+            # because which level is the link depends on how it was made -- the
+            # version directory for a versioned install, the name directory for
+            # an unversioned one, and neither if someone linked by hand
+            # somewhere else. Stopping at the root matters: at a site where
+            # /ice is itself a symlink, walking past it would report every
+            # package in the studio as symlinked.
             "        _bc_link=",
-            '        if [ -L "$_bc_path" ] || [ -L "${_bc_path%/*}" ]; then',
-            "            _bc_link='  (symlinked)'",
-            "        fi",
+            '        _bc_walk=${_bc_path%/}',
+            '        while [ -n "$_bc_walk" ] && [ "$_bc_walk" != "$_bc_root" ] \\',
+            '              && [ "$_bc_walk" != "/" ]; do',
+            '            if [ -L "$_bc_walk" ]; then',
+            "                _bc_link='  (symlinked)'",
+            "                break",
+            "            fi",
+            '            _bc_walk=${_bc_walk%/*}',
+            "        done",
             "        printf '%s\\n'"
             ' "    ${_bc_c}${_bc_name}  (${_bc_label})${_bc_link}${_bc0}"',
             "    done",
