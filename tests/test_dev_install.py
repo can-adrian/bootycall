@@ -17,6 +17,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
 from bootycall import config, dev_install  # noqa: E402
+from bootycall import dev_install as di  # noqa: E402
+from bootycall import local_packages as lp  # noqa: E402
 from bootycall.local_packages import (  # noqa: E402
     LocalPackage,
     definition_mismatch,
@@ -308,6 +310,89 @@ outsider = LocalPackage(name="elsewhere", version="", path=ROOT / "quiet" / "thi
 error = dev_install.remove_installed(outsider, INSTALLED)
 check("something outside the root is refused", "refusing" in error, error)
 check("and is still there", (ROOT / "quiet" / "thing").is_dir())
+
+print("\nthe install check looks for the name the package declares")
+# The bug this replaced: a checkout called rig_utils-alembic-properties whose
+# package.py says name = "rig_utils_alembic_properties" installs correctly and
+# was then reported as a failed build, because the check looked for a directory
+# named after the folder rather than the package.
+_odd = Path(tempfile.mkdtemp(prefix="bootycall-oddname-"))
+_odd_src = _odd / "rig_utils-alembic-properties"
+_odd_src.mkdir()
+(_odd_src / "package.py").write_text(
+    'name = "rig_utils_alembic_properties"\nversion = "0.3.1"\n'
+)
+_odd_dest = _odd / "installed"
+_odd_dest.mkdir()
+
+_where = [str(x) for x in di.installed_paths(_odd_src, _odd_dest)]
+check(
+    "the declared name and version come first",
+    _where[0] == str(_odd_dest / "rig_utils_alembic_properties" / "0.3.1"),
+    str(_where),
+)
+check(
+    "the folder name is kept as a fallback, not dropped",
+    str(_odd_dest / "rig_utils-alembic-properties") in _where,
+    str(_where),
+)
+
+_saved_cmd = config.DEV_INSTALL_COMMAND
+# Behaves like rez: installs under <prefix>/<name>/<version>.
+config.DEV_INSTALL_COMMAND = (
+    "bash", "-c",
+    "mkdir -p $1/rig_utils_alembic_properties/0.3.1 && "
+    "cp package.py $1/rig_utils_alembic_properties/0.3.1/",
+    "x", "{dest}",
+)
+_ok, _out = di.install(_odd_src, _odd_dest)
+check("a build under the declared name is a success", _ok, _out[:200])
+
+# And the check still has to catch the thing it was written for.
+config.DEV_INSTALL_COMMAND = ("bash", "-c", "echo built somewhere else; exit 0")
+_ok, _out = di.install(_odd_src, _odd_dest / "empty")
+check("a build that produces nothing is still caught", not _ok, _out[:120])
+check(
+    "and the path it names is the one rez would have used",
+    "rig_utils_alembic_properties/0.3.1" in _out,
+    _out.splitlines()[0] if _out else "",
+)
+config.DEV_INSTALL_COMMAND = _saved_cmd
+
+print("\nnothing in the working location is ever removed")
+_guard = Path(tempfile.mkdtemp(prefix="bootycall-guard-"))
+_guard_work = _guard / "dev"
+(_guard_work / "my_tool" / "1.0.0").mkdir(parents=True)
+(_guard_work / "my_tool" / "1.0.0" / "package.py").write_text(
+    'name = "my_tool"\nversion = "1.0.0"\n'
+)
+_saved_paths = dict(config.PATH_OVERRIDES) if hasattr(config, "PATH_OVERRIDES") else None
+config.set_path_overrides(
+    # The setting anyone could make: the working location inside the dev root,
+    # where a Remove would otherwise walk straight into the source.
+    {"dev_root": str(_guard), "dev_working_root": str(_guard_work)}
+)
+_victim = lp.LocalPackage(
+    name="my_tool", version="1.0.0", path=_guard_work / "my_tool" / "1.0.0"
+)
+_refusal = lp.delete_package(_victim, _guard)
+check("it refuses", _refusal != "", _refusal)
+check("and says why", "working location" in _refusal, _refusal)
+check(
+    "and the working copy is still there",
+    (_guard_work / "my_tool" / "1.0.0" / "package.py").is_file(),
+)
+
+# A real installed package beside it is still removable: the guard must not
+# turn Remove off altogether.
+(_guard / "other_tool" / "2.0.0").mkdir(parents=True)
+(_guard / "other_tool" / "2.0.0" / "package.py").write_text('name = "other_tool"\n')
+_fine = lp.LocalPackage(
+    name="other_tool", version="2.0.0", path=_guard / "other_tool" / "2.0.0"
+)
+check("an installed package next door still goes", lp.delete_package(_fine, _guard) == "", "")
+check("really gone", not (_guard / "other_tool").exists())
+config.set_path_overrides({})
 
 print()
 if failures:

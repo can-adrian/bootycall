@@ -10,6 +10,36 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.11.2
+
+Patch: a successful install reported as a failure, and a guard on your source.
+
+- **Install checked for the wrong directory.** It looked for
+  ``<dev root>/<folder it built from>``; rez installs to
+  ``<prefix>/<name>/<version>`` using the name the *definition* declares. A
+  checkout called ``rig_utils-alembic-properties`` whose ``package.py`` says
+  ``name = "rig_utils_alembic_properties"`` installed correctly and was then
+  reported as a failed build that had "installed somewhere else". Exactly the
+  mistake the symlink path made in 0.7.0, one function over and not looked for.
+
+  The declared name and version are checked first, and the folder name is kept
+  as a fallback for definitions that cannot be read statically — a check that
+  cannot find the package is worse than no check, because it turns a build that
+  worked into a reported failure. The check that started all this still fires:
+  a build that exits zero and produces nothing is still caught, and now names
+  the path rez would have used.
+
+- **Nothing in the dev working location is ever removed.** Enforced in
+  ``delete_package`` rather than in the menu, so no path into it can be missed.
+  Normally the working location is nowhere near a package root and the check
+  never fires; point it inside the dev root — a setting anyone can make — and
+  it is the only thing between Remove and a day's work. A symlinked install is
+  untouched by this: the link is not a working copy, and removing the pointer
+  is what Remove is for.
+
+  The right-click menu on an uninstalled row offers Install, Link, Browse and
+  Copy path, and a test asserts it will never offer anything that removes.
+
 ## 0.11.1
 
 Patch: less hovering, clearer menu.

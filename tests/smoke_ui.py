@@ -2023,6 +2023,43 @@ check(
     window.dev_frame.badge.text(),
 )
 
+# A working copy is source, not a build. Nothing in this menu may remove it.
+_work_labels = []
+
+
+class _CollectWorkMenu:
+    def __init__(self, *a, **k):
+        pass
+
+    def addAction(self, label):
+        _work_labels.append(label)
+        return label
+
+    def addSeparator(self):
+        pass
+
+    def exec(self, *a):
+        return None
+
+
+_uninstalled = [r for r in _rows if r.data(mw_mod._SOURCE_PATH_ROLE)][0]
+_real_menu0 = mw_mod.QMenu
+mw_mod.QMenu = _CollectWorkMenu
+window._on_package_menu(
+    window.dev_list, window.dev_list.visualItemRect(_uninstalled).center()
+)
+mw_mod.QMenu = _real_menu0
+check(
+    "the menu offers no way to remove a working copy",
+    not any(
+        word in label.lower()
+        for label in _work_labels
+        for word in ("remove", "delete")
+    ),
+    str(_work_labels),
+)
+check("what it does offer is Install and Link", "Install" in _work_labels, str(_work_labels))
+
 _saved_install = cfg_mod.DEV_INSTALL_COMMAND
 cfg_mod.DEV_INSTALL_COMMAND = (
     "bash", "-c",

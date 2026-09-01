@@ -419,7 +419,13 @@ row already said in words — and the one thing a tooltip was genuinely carrying
 that removing a link leaves the working copy alone, now appears in the
 confirmation dialog, which is where it is actually needed.
 
-`delete_package()` guards the two ways this could go badly wrong rather than
+Working copies are never removed. The dev list shows them, and the menu on one
+offers Install, Link, Browse and Copy path — nothing destructive. The guard is
+in `delete_package()` rather than in the menu, so no path into it can be
+missed: point the working location inside the dev root and it is the only thing
+between Remove and a day's work.
+
+`delete_package()` guards the ways this could go badly wrong rather than
 trusting the caller:
 
 - the target must live **strictly inside** the root it was listed from, so a

@@ -457,9 +457,20 @@ def delete_package(package: LocalPackage, root: Path | str) -> str:
     version directory left as the only child of its package-name directory
     takes the empty parent with it, so removing your last ``nuke_utils`` build
     does not leave an empty ``nuke_utils/`` behind to look like a package.
+
+    **Nothing in the dev working location is ever removed**, whatever root it
+    was listed from. That directory holds the source you edit, and no button in
+    this application is allowed to delete it. Normally it is nowhere near a
+    package root and the check never fires; point the working location inside
+    the dev root, which is a setting anyone can make, and it is the only thing
+    standing between Remove and a day's work.
     """
     root_path = Path(root).resolve()
     target = package.path
+
+    refusal = _working_copy_refusal(target)
+    if refusal:
+        return refusal
 
     if target.is_symlink():
         # Checked without resolving: the *link* has to be inside the root, and
@@ -494,6 +505,28 @@ def delete_package(package: LocalPackage, root: Path | str) -> str:
         return "could not delete %s: %s" % (resolved, exc)
 
     _prune_empty_parent(resolved, root_path)
+    return ""
+
+
+def _working_copy_refusal(target: Path) -> str:
+    """"" unless ``target`` is inside the dev working location."""
+    try:
+        working = dev_working_root().resolve()
+    except OSError:
+        return ""
+    if not working.is_dir():
+        return ""
+
+    # The link itself, not what it points at: a symlinked install *points* into
+    # the working location by design, and removing the pointer is exactly what
+    # Remove is for. It is the package directory being a working copy that is
+    # forbidden.
+    here = Path(os.path.abspath(target))
+    if here == working or working in here.parents:
+        return (
+            "refusing to remove %s: it is in your dev working location (%s), "
+            "which BootyCall never deletes from" % (here, working)
+        )
     return ""
 
 

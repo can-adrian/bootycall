@@ -155,16 +155,53 @@ def install(source: Path | str, dest_root: Path | str) -> tuple[bool, str]:
     # produces nothing at all still exits cleanly -- and the package is then
     # missing from the one place BootyCall told you it would be, with a green
     # message saying it worked. Check.
-    landed = dest / source_path.name
-    if not landed.is_dir():
-        return False, (
-            "%s exited successfully but nothing appeared at %s.\n\n"
-            "The build most likely installed somewhere else - rez installs to "
-            "its configured local packages path when the prefix is not "
-            "honoured. The output below should say where.\n\n%s"
-            % (argv[0], landed, output.strip())
-        )
-    return True, output.strip()
+    #
+    # Check under the name the package *declares*, not the folder it was built
+    # from. rez installs to <prefix>/<name>/<version>, and a checkout called
+    # rig_utils-alembic-properties whose package.py says
+    # name = "rig_utils_alembic_properties" lands under the latter. Looking for
+    # the folder name found nothing and reported a successful build as a
+    # failure -- the same mistake the symlink path made, one function over.
+    for landed in installed_paths(source_path, dest):
+        if landed.is_dir():
+            return True, output.strip()
+
+    expected = installed_paths(source_path, dest)
+    return False, (
+        "%s exited successfully but nothing appeared at %s.\n\n"
+        "The build most likely installed somewhere else - rez installs to "
+        "its configured local packages path when the prefix is not "
+        "honoured. The output below should say where.\n\n%s"
+        % (argv[0], expected[0], output.strip())
+    )
+
+
+def installed_paths(source: Path | str, dest_root: Path | str) -> list[Path]:
+    """Where a build of ``source`` could reasonably have landed, best first.
+
+    rez installs to ``<prefix>/<name>/<version>`` using the name and version
+    the definition declares, which need not match the folder being built. The
+    folder name is kept as a fallback for definitions that cannot be read
+    statically -- a name built from a variable, say -- because a check that
+    cannot find the package is worse than no check at all: it turns a build
+    that worked into a reported failure.
+    """
+    source_path = Path(source)
+    root = Path(dest_root)
+    fields = definition_fields(source_path)
+    name = fields.get("name") or ""
+    version = fields.get("version", "")
+
+    candidates: list[Path] = []
+    if name:
+        if version:
+            candidates.append(root / name / version)
+        candidates.append(root / name)
+    if source_path.name not in (name, ""):
+        candidates.append(root / source_path.name)
+    elif not name:
+        candidates.append(root / source_path.name)
+    return candidates
 
 
 def symlink(source: Path | str, dest_root: Path | str) -> tuple[bool, str]:
