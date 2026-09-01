@@ -66,11 +66,11 @@ from ..local_packages import (
 from ..parser import Bootstrap
 from .chips import ShowChipBar
 from .collapsible import CollapsibleFrame
+from .package_delegate import PackageItemDelegate
 from .config_menu import ConfigMenuAction
 from .dcc_tile import DccTile
 from .favorites_window import FavoritesWindow
 from .flow_layout import FlowLayout
-from .install_dialog import InstallPackageDialog
 from .settings_dialog import SettingsDialog
 from .style import STYLESHEET
 
@@ -86,6 +86,19 @@ DCC_TILE_MIN_WIDTH = 84
 #: Item roles on the local/dev package rows.
 _PACKAGE_NAME_ROLE = Qt.UserRole
 _PACKAGE_PATH_ROLE = Qt.UserRole + 1
+#: On a dev row that exists in the working location but is not installed: the
+#: folder it would be built from. Such a row deliberately carries neither of
+#: the roles above -- it is not a package rez can see, and every piece of code
+#: that asks "which package is this row?" must keep skipping it.
+_SOURCE_PATH_ROLE = Qt.UserRole + 2
+
+#: Row colours, matching the counts in the section header exactly. A header
+#: that says "2 outranked" in red over two grey rows makes the reader work out
+#: for themselves which two it meant.
+_ROW_IN_USE = "#e0a23c"      # the "N in use" note
+_ROW_LOST = "#e06c75"        # the "N outranked / N unusable" alert
+_ROW_QUIET = "#90a8c2"       # says nothing about the resolve
+_ROW_PLAIN = "#d7dae0"
 
 #: Shown under the logo in quotes, one at random per launch. Stored unquoted so
 #: the list stays the source of truth for the text itself.
@@ -349,6 +362,7 @@ class MainWindow(QMainWindow):
         self.resolve_frame = CollapsibleFrame("Resolved packages", expanded=False)
         self.resolve_frame.toggled.connect(self._on_frame_toggled)
         self.package_list = QListWidget()
+        self.package_list.setItemDelegate(PackageItemDelegate(self))
         self.package_list.setSelectionMode(QListWidget.ExtendedSelection)
         self.package_list.setAlternatingRowColors(False)
         self.package_list.setMinimumHeight(120)
@@ -373,7 +387,7 @@ class MainWindow(QMainWindow):
             self.dev_path_label,
             self.dev_list,
         ) = self._build_package_section(
-            "Installed Dev Packages", expanded=True, show_path=False
+            "Dev Packages", expanded=True, show_path=False
         )
         self.dev_list.itemChanged.connect(self._on_dev_item_changed)
         self.dev_frame.set_checked(self._use_dev)
@@ -455,6 +469,7 @@ class MainWindow(QMainWindow):
         frame.add_widget(path_label)
 
         listing = QListWidget()
+        listing.setItemDelegate(PackageItemDelegate(listing))
         listing.setSelectionMode(QListWidget.ExtendedSelection)
         listing.setMinimumHeight(100)
         listing.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -1399,8 +1414,9 @@ class MainWindow(QMainWindow):
             listing=self.dev_list,
             root=dev_root(),
             exclude=(),
-            empty_hint="No dev packages installed - right-click here to install one.",
+            empty_hint="Nothing installed and nothing in your working location.",
         )
+        self._add_uninstalled_dev(self.dev_list, self._dev_packages)
         self.dev_list.blockSignals(blocked)
 
         # The resolve list marks overrides, so it has to be redrawn too.
@@ -1409,6 +1425,63 @@ class MainWindow(QMainWindow):
             self._show_packages(tool)
         else:
             self._refresh_override_marks()
+
+    def _add_uninstalled_dev(
+        self, listing: QListWidget, installed: list[LocalPackage]
+    ) -> list:
+        """Append the working-location packages that are not installed yet.
+
+        The dev list used to show only what was installed, and getting anything
+        into it meant opening a second window to browse the working location --
+        a dialog whose whole job was to list a directory you already have a
+        setting for. Showing the lot is the same information with the trip
+        removed: what is in play, and what could be.
+
+        These rows are deliberately inert. No name role, no path role, no tick:
+        nothing here resolves, and every piece of code that walks this list
+        asking "which package is this?" must go on skipping them. What they get
+        instead is :data:`_SOURCE_PATH_ROLE`, which is what Install builds from.
+        """
+        try:
+            working = dev_install.list_working_packages(self.dev_working_root_path())
+        except OSError:
+            return []
+
+        known = {p.name for p in installed}
+        missing = [w for w in working if w.name not in known]
+        if not missing:
+            return missing
+
+        # Clear the placeholder: there is something to show after all.
+        if listing.count() == 1 and not listing.item(0).data(_PACKAGE_PATH_ROLE):
+            listing.takeItem(0)
+
+        for package in sorted(missing, key=lambda w: w.name.lower()):
+            item = QListWidgetItem("%s  (not installed)" % package.name)
+            item.setData(_SOURCE_PATH_ROLE, str(package.path))
+            item.setForeground(QColor(_ROW_QUIET))
+            # The box is drawn but cannot be ticked: enabling a package that
+            # is not there would be a lie the resolve then contradicts.
+            item.setFlags(item.flags() & ~Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Unchecked)
+            tip = "%s\n\nIn your working location but not installed, so it is "
+            tip += "not in any resolve.\nRight-click to install or link it."
+            item.setToolTip(tip % package.path)
+            if package.problem:
+                item.setToolTip("%s\n\n%s" % (item.toolTip(), package.problem))
+            listing.addItem(item)
+
+        self._refresh_dev_badge(listing, installed, missing)
+        return missing
+
+    def _refresh_dev_badge(self, listing, installed, missing) -> None:
+        """Count both halves, so the badge matches what is on screen."""
+        if not installed and not missing:
+            return
+        parts = ["%d installed" % len(installed)] if installed else []
+        if missing:
+            parts.append("%d not" % len(missing))
+        self.dev_frame.set_badge("  \u00b7  ".join(parts))
 
     def _fill_package_section(
         self,
@@ -1619,15 +1692,15 @@ class MainWindow(QMainWindow):
         clicked = listing.itemAt(point)
         is_dev = listing is self.dev_list
 
+        source = clicked.data(_SOURCE_PATH_ROLE) if clicked is not None else None
+        if source:
+            self._uninstalled_menu(listing, clicked, source, point)
+            return
+
         if clicked is None or not clicked.data(_PACKAGE_PATH_ROLE):
-            # Empty space, a placeholder, or an error row. On the dev list that
-            # is exactly where someone with nothing installed yet will
-            # right-click, so Install Package has to be reachable from there.
-            if is_dev:
-                menu = QMenu(self)
-                install_action = menu.addAction("Install Package...")
-                if menu.exec(listing.mapToGlobal(point)) is install_action:
-                    self.show_install_dialog()
+            # Empty space, a placeholder, or an error row. Nothing to act on:
+            # the packages you could install are rows in this list now, so
+            # there is no hidden action to reach for here.
             return
 
         selected = [i for i in listing.selectedItems() if i.data(_PACKAGE_PATH_ROLE)]
@@ -1640,9 +1713,6 @@ class MainWindow(QMainWindow):
 
         count = len(packages)
         menu = QMenu(self)
-        install_action = menu.addAction("Install Package...") if is_dev else None
-        if install_action is not None:
-            menu.addSeparator()
         browse_action = menu.addAction(
             "Browse folder" if count == 1 else "Browse %d folders" % count
         )
@@ -1657,9 +1727,7 @@ class MainWindow(QMainWindow):
         )
 
         chosen = menu.exec(listing.mapToGlobal(point))
-        if install_action is not None and chosen is install_action:
-            self.show_install_dialog()
-        elif chosen is browse_action:
+        if chosen is browse_action:
             self.browse_packages(packages)
         elif chosen is copy_action:
             QApplication.clipboard().setText(
@@ -1671,11 +1739,41 @@ class MainWindow(QMainWindow):
         elif chosen is delete_action:
             self._confirm_delete_packages(listing, packages)
 
-    def show_install_dialog(self) -> None:
-        """Browse the working location and install one of its packages."""
-        dialog = InstallPackageDialog(dev_working_root(), dev_root(), self)
-        dialog.exec()
-        if not dialog.installed:
+    def _uninstalled_menu(self, listing, item, source: str, point) -> None:
+        """Right-click on something in the working location that is not built."""
+        menu = QMenu(self)
+        build_action = menu.addAction("Install")
+        link_action = menu.addAction("Link to working copy")
+        menu.addSeparator()
+        browse_action = menu.addAction("Browse folder")
+        copy_action = menu.addAction("Copy path")
+
+        chosen = menu.exec(listing.mapToGlobal(point))
+        if chosen is None:
+            return
+        if chosen is copy_action:
+            QApplication.clipboard().setText(source)
+            self.statusBar().showMessage("Copied %s" % source, 4000)
+            return
+        if chosen is browse_action:
+            errors = self.browse_paths([source])
+            if errors:
+                self.statusBar().showMessage(errors[0], 6000)
+            return
+
+        link = chosen is link_action
+        action = dev_install.symlink if link else dev_install.install
+        self.statusBar().showMessage(
+            "%s %s..." % ("Linking" if link else "Building", Path(source).name)
+        )
+        QApplication.processEvents()
+        ok, detail = action(source, dev_root())
+        if not ok:
+            QMessageBox.critical(
+                self,
+                "Could not %s" % ("link" if link else "install"),
+                "%s\n\n%s" % (source, detail),
+            )
             return
 
         # Everything, not just the two package lists. A new package changes
@@ -1683,11 +1781,16 @@ class MainWindow(QMainWindow):
         # cached resolve probe answered before it existed -- and a stale cache
         # here is exactly the kind of thing that costs an afternoon.
         self.reload_all()
-        names = ", ".join(dict.fromkeys(dialog.installed))
-        self.statusBar().showMessage("Installed %s" % names, 8000)
+        self.statusBar().showMessage(
+            "%s %s" % ("Linked" if link else "Installed", Path(source).name), 8000
+        )
 
     def browse_packages(self, packages: list[LocalPackage]) -> list[str]:
-        """Open each package folder in the desktop's file manager.
+        """Open each package folder in the desktop's file manager."""
+        return self.browse_paths([str(p.path) for p in packages])
+
+    def browse_paths(self, paths: list[str]) -> list[str]:
+        """Open each folder in the desktop's file manager.
 
         Returns the failures. Opening a handful at once is the point -- you are
         usually comparing two builds -- but a dozen windows is not, so this
@@ -1695,15 +1798,14 @@ class MainWindow(QMainWindow):
         """
         limit = 5
         errors: list[str] = []
-        for package in packages[:limit]:
-            if not package.path.is_dir():
-                errors.append("%s is no longer there" % package.path)
+        for path in paths[:limit]:
+            if not Path(path).is_dir():
+                errors.append("%s is no longer there" % path)
                 continue
-            if not QDesktopServices.openUrl(
-                QUrl.fromLocalFile(str(package.path))
-            ):
-                errors.append("no file manager would open %s" % package.path)
+            if not QDesktopServices.openUrl(QUrl.fromLocalFile(path)):
+                errors.append("no file manager would open %s" % path)
 
+        packages = paths
         if len(packages) > limit:
             errors.append(
                 "opened the first %d of %d; the rest were skipped"
@@ -1833,7 +1935,7 @@ class MainWindow(QMainWindow):
                     item.setText(
                         "%s      does not satisfy %s" % (base, shadow.request)
                     )
-                    item.setForeground(QColor("#e06c75"))
+                    item.setForeground(QColor(_ROW_LOST))
                     item.setToolTip(
                         "%s\nThe show asks for '%s', which this version cannot "
                         "satisfy - rez will use the studio build instead."
@@ -1853,7 +1955,7 @@ class MainWindow(QMainWindow):
                             "%s      outranked by %s"
                             % (base, winner.version or "another build")
                         )
-                        item.setForeground(QColor("#90a8c2"))
+                        item.setForeground(QColor(_ROW_LOST))
                         item.setToolTip(
                             "%s\nThe show asks for '%s'. rez takes the highest "
                             "version satisfying that across every package path, "
@@ -1869,7 +1971,7 @@ class MainWindow(QMainWindow):
                         )
                     else:
                         item.setText("%s      overrides %s" % (base, shadow.request))
-                        item.setForeground(QColor("#e0a23c"))
+                        item.setForeground(QColor(_ROW_IN_USE))
                         item.setToolTip(
                             "%s\nThe highest version of '%s' satisfying the "
                             "show's '%s' anywhere on the packages path, so this "
@@ -1878,10 +1980,10 @@ class MainWindow(QMainWindow):
                         )
                 elif shadow is not None:
                     item.setText("%s      (older build)" % base)
-                    item.setForeground(QColor("#90a8c2"))
+                    item.setForeground(QColor(_ROW_QUIET))
                 else:
                     item.setText(base)
-                    item.setForeground(QColor("#d7dae0"))
+                    item.setForeground(QColor(_ROW_PLAIN))
 
             self._float_overrides(listing, overrides)
 

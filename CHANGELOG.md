@@ -10,6 +10,35 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.11.0
+
+Minor: the dev section shows a different set of packages than it used to.
+
+- **The dev list shows everything in the working location, installed or not.**
+  Uninstalled ones are greyed, marked *(not installed)*, and their tick is drawn
+  but dead — enabling a package that is not there would be a promise the resolve
+  then breaks. Right-click one to Install or Link.
+
+  The Install Package dialog is gone with it. It was a second window whose whole
+  job was to list a directory the settings already name, and what it showed you
+  was the list you were already looking at, minus half of it.
+
+- **"Installed Dev Packages" is now just "Dev Packages"**, since it is no longer
+  only the installed ones. Its badge counts both halves: `6 installed · 2 not`.
+
+- **Row colour matches the header count.** A build that will be in the
+  environment is amber like the *in use* note; one that lost — outranked or
+  unusable — is red like the alert that counts it. Outranked rows used to be
+  grey, which is the colour of a row that has nothing to say, while the header
+  called them out in red.
+
+- **Bracketed asides are italic.** Every row is a package followed by something
+  this window worked out about it, and until now both halves were drawn the same
+  weight. `(symlinked)`, `(not installed)`, `(older build)`, `(show package)`
+  now lean; the package itself stays upright. A delegate paints the text only —
+  checkbox, selection and focus are still the style's, because reimplementing
+  those is how a list stops looking like the rest of the application.
+
 ## 0.10.0
 
 Minor: what the resolve is handed changed, and so did what it reports.

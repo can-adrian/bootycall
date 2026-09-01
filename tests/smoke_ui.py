@@ -608,12 +608,37 @@ check("resolve closes again", not window.resolve_frame.is_expanded())
 check("arrow points right", window.resolve_frame.toggle_button.arrowType() == Qt.RightArrow)
 check("badge survives collapse", "packages" in window.resolve_frame.badge.text())
 
+print("\nbracketed asides are set apart from the package they follow")
+from bootycall.ui.package_delegate import runs as _runs  # noqa: E402
+
+check(
+    "the aside is split out and italicised",
+    _runs("rig_utils-1.8.666  (symlinked)")
+    == [("rig_utils-1.8.666  ", False), ("(symlinked)", True)],
+    str(_runs("rig_utils-1.8.666  (symlinked)")),
+)
+check(
+    "a row with no aside is left whole, so Qt draws it as it always did",
+    _runs("nuke_utils-4.10.0      overrides nuke_utils-4")
+    == [("nuke_utils-4.10.0      overrides nuke_utils-4", False)],
+)
+check(
+    "two asides both count",
+    [italic for _, italic in _runs("a-1  (dev)  (symlinked)")] == [False, True, False, True],
+    str(_runs("a-1  (dev)  (symlinked)")),
+)
+check(
+    "an unclosed bracket does not swallow the rest of the row",
+    _runs("a-1  (oops") == [("a-1  (oops", False)],
+    str(_runs("a-1  (oops")),
+)
+
 print("\nlocal and dev package sections")
 window.local_frame.set_expanded(True)
 window.dev_frame.set_expanded(True)
 QApplication.processEvents()
 check("both frames open", window.local_frame.is_expanded() and window.dev_frame.is_expanded())
-check("frames are titled separately", window.local_frame.toggle_button.text() == "Local packages" and window.dev_frame.toggle_button.text() == "Installed Dev Packages", window.dev_frame.toggle_button.text())
+check("frames are titled separately", window.local_frame.toggle_button.text() == "Local packages" and window.dev_frame.toggle_button.text() == "Dev Packages", window.dev_frame.toggle_button.text())
 check(
     "local path is the user root, without /dev",
     window.local_path_label.text().startswith("/tmp/ice/rez/packages/local/adrian ")
@@ -926,9 +951,9 @@ check(
     window.local_list.item(0).text(),
 )
 check(
-    "dev row explains, and points at the way to fix it",
-    "No dev packages installed" in window.dev_list.item(0).text()
-    and "right-click" in window.dev_list.item(0).text(),
+    "dev row says both halves are empty - nothing built and nothing to build",
+    "Nothing installed" in window.dev_list.item(0).text()
+    and "working location" in window.dev_list.item(0).text(),
     window.dev_list.item(0).text(),
 )
 check("no crash", True)
@@ -1819,7 +1844,6 @@ import bootycall.ui.main_window as mw_mod  # noqa: E402
 
 print("\ninstalled dev packages have their own checkboxes")
 from bootycall import dev_install as _di  # noqa: E402
-from bootycall.ui.install_dialog import InstallPackageDialog  # noqa: E402
 from bootycall.ui.main_window import _PACKAGE_NAME_ROLE as _NAME_ROLE  # noqa: E402
 
 pin("batman_returns")
@@ -1924,7 +1948,29 @@ else:
     os.environ.pop("REZ_PACKAGES_PATH", None)
 launcher._PACKAGES_PATH = None
 
-print("\nthe Install Package browser")
+print("\nrow colour matches the counts in the header")
+_colour_of = lambda item: item.foreground().color().name()
+_pin_texts = [window.local_list.item(i) for i in range(window.local_list.count())]
+check(
+    "a build that will be in the environment is the colour of 'in use'",
+    all(
+        _colour_of(i) == mw_mod._ROW_IN_USE
+        for i in _pin_texts
+        if "overrides" in i.text()
+    ),
+    str([(i.text(), _colour_of(i)) for i in _pin_texts]),
+)
+check(
+    "and one that lost is the colour of the alert that counts it",
+    all(
+        _colour_of(i) == mw_mod._ROW_LOST
+        for i in _pin_texts
+        if "outranked by" in i.text() or "does not satisfy" in i.text()
+    ),
+    str([(i.text(), _colour_of(i)) for i in _pin_texts]),
+)
+
+print("\nthe working location's packages are rows in the list, not a second window")
 _work = Path(tempfile.mkdtemp(prefix="bootycall-working-"))
 (_work / "shot_tools").mkdir()
 (_work / "shot_tools" / "package.py").write_text("name = 'shot_tools'\n")
@@ -1933,37 +1979,49 @@ _work = Path(tempfile.mkdtemp(prefix="bootycall-working-"))
 (_work / "half_done" / "readme.txt").write_text("no definition here\n")
 
 _installed = Path(tempfile.mkdtemp(prefix="bootycall-installed-"))
-_dialog = InstallPackageDialog(_work, _installed)
-check("every folder is listed", _dialog.listing.count() == 3, str(_dialog.listing.count()))
-_rows = [_dialog.listing.item(i).text() for i in range(_dialog.listing.count())]
-check(
-    "the non-packages say why they cannot be installed",
-    sum("no package definition" in t for t in _rows) == 2,
-    str(_rows),
+cfg_mod.set_path_overrides(
+    {"dev_root": str(_installed), "dev_working_root": str(_work)}
 )
-check(
-    "and cannot be selected",
-    sum(
-        1
-        for i in range(_dialog.listing.count())
-        if not (_dialog.listing.item(i).flags() & Qt.ItemIsSelectable)
-    )
-    == 2,
-)
-check("nothing selected, so nothing to press", not _dialog.install_button.isEnabled())
-check("nor symlink", not _dialog.symlink_button.isEnabled())
-check(
-    "the heading names both ends of the operation",
-    str(_work) in _dialog.heading.text() and str(_installed) in _dialog.heading.text(),
-    _dialog.heading.text(),
-)
-
-_row = [i for i in range(_dialog.listing.count()) if _dialog.listing.item(i).text() == "shot_tools"][0]
-_dialog.listing.setCurrentRow(_row)
+window.refresh_package_lists()
 QApplication.processEvents()
-check("selecting a real package enables Install", _dialog.install_button.isEnabled())
-check("and Symlink", _dialog.symlink_button.isEnabled())
-check("which is what it picked", _dialog.selected().name == "shot_tools")
+
+_rows = [window.dev_list.item(i) for i in range(window.dev_list.count())]
+_texts = [r.text() for r in _rows]
+check(
+    "everything in the working location is shown, installed or not",
+    sorted(_texts) == sorted(
+        ["half_done  (not installed)", "just_notes  (not installed)",
+         "shot_tools  (not installed)"]
+    ),
+    str(_texts),
+)
+check(
+    "an uninstalled row carries no package name - nothing here resolves",
+    all(r.data(_NAME_ROLE) is None for r in _rows),
+    str([r.data(_NAME_ROLE) for r in _rows]),
+)
+check(
+    "nor a package path, so the delete and browse paths keep skipping it",
+    all(r.data(mw_mod._PACKAGE_PATH_ROLE) is None for r in _rows),
+)
+check(
+    "it does carry the folder to build from",
+    sorted(Path(r.data(mw_mod._SOURCE_PATH_ROLE)).name for r in _rows)
+    == ["half_done", "just_notes", "shot_tools"],
+)
+check(
+    "the box is drawn but cannot be ticked",
+    all(
+        r.data(Qt.CheckStateRole) is not None
+        and not (r.flags() & Qt.ItemIsUserCheckable)
+        for r in _rows
+    ),
+)
+check(
+    "and the badge counts both halves",
+    window.dev_frame.badge.text() == "3 not",
+    window.dev_frame.badge.text(),
+)
 
 _saved_install = cfg_mod.DEV_INSTALL_COMMAND
 cfg_mod.DEV_INSTALL_COMMAND = (
@@ -1971,51 +2029,69 @@ cfg_mod.DEV_INSTALL_COMMAND = (
     "mkdir -p $1/$(basename $PWD)/1.0.0; cp package.py $1/$(basename $PWD)/1.0.0/",
     "x", "{dest}",
 )
-_dialog._on_install()
-QApplication.processEvents()
-check("installing lands the package", (_installed / "shot_tools" / "1.0.0" / "package.py").is_file())
-check("and the dialog remembers it did", _dialog.installed == ["shot_tools"], str(_dialog.installed))
-check("saying so", "Installed shot_tools" in _dialog.status.text(), _dialog.status.text())
-
-cfg_mod.DEV_INSTALL_COMMAND = ("bash", "-c", "echo 'the build failed' >&2; exit 1")
-_dialog.installed.clear()
-_failures = []
-_real_box = mw_mod.QMessageBox
+_shot_row = [r for r in _rows if r.text().startswith("shot_tools")][0]
+_source = _shot_row.data(mw_mod._SOURCE_PATH_ROLE)
+_real_menu = mw_mod.QMenu
 
 
-class _QuietBox:
-    Warning = _real_box.Warning
+class _PickFirst:
+    """A menu that silently chooses whichever action was added first.
 
-    def __init__(self, *args, **kwargs):
+    Actions are plain strings: the handler only ever compares them with `is`,
+    and a real QAction would need a real menu to hang off.
+    """
+
+    def __init__(self, *a, **k):
+        self._first = None
+
+    def addAction(self, label):
+        if self._first is None:
+            self._first = label
+        return label
+
+    def addSeparator(self):
         pass
 
-    def setIcon(self, *a):
-        pass
-
-    setWindowTitle = setText = setInformativeText = setIcon
-
-    def setDetailedText(self, text):
-        _failures.append(text)
-
-    def exec(self):
-        return 0
+    def exec(self, *a):
+        return self._first
 
 
-import bootycall.ui.install_dialog as _id_mod  # noqa: E402
-
-_id_mod.QMessageBox = _QuietBox
-_dialog._on_install()
+mw_mod.QMenu = _PickFirst
+window._on_package_menu(window.dev_list, window.dev_list.visualItemRect(_shot_row).center())
 QApplication.processEvents()
-_id_mod.QMessageBox = _real_box
-check("a failed build is reported, not swallowed", _dialog.installed == [], str(_dialog.installed))
-check("the pane says so", "could not be installed" in _dialog.status.text(), _dialog.status.text())
-check(
-    "and the build's own output is offered",
-    _failures and "the build failed" in _failures[-1],
-    str(_failures[-1:]) if _failures else "nothing captured",
-)
+mw_mod.QMenu = _real_menu
 cfg_mod.DEV_INSTALL_COMMAND = _saved_install
-_dialog.close()
+
+# reload_all() re-reads the saved settings, which is the whole point of it --
+# so the throwaway roots this test set at runtime have to be put back.
+cfg_mod.set_path_overrides(
+    {"dev_root": str(_installed), "dev_working_root": str(_work)}
+)
+window.refresh_package_lists()
+QApplication.processEvents()
+
+check(
+    "Install builds it into the dev root",
+    (_installed / "shot_tools" / "1.0.0" / "package.py").is_file(),
+)
+_after = [window.dev_list.item(i).text() for i in range(window.dev_list.count())]
+check(
+    "and the row becomes a real package, ticked",
+    any(t.startswith("shot_tools-1.0.0") and "(not installed)" not in t for t in _after),
+    str(_after),
+)
+check(
+    "with the two that are still only in the working location behind it",
+    sum("(not installed)" in t for t in _after) == 2,
+    str(_after),
+)
+check(
+    "the badge follows",
+    window.dev_frame.badge.text() == "1 installed  \u00b7  2 not",
+    window.dev_frame.badge.text(),
+)
+
+_real_box = mw_mod.QMessageBox
 
 print("\nlaunching checks the installed dev packages against the working copies")
 _stale_work = Path(tempfile.mkdtemp(prefix="bootycall-stale-"))
@@ -3044,28 +3120,6 @@ window._rebuild_file_menu()
 check("store empty", len(window.store) == 0)
 check("placeholder back", "   Nothing saved yet" in menu_texts(), str(menu_texts()))
 check("no crash", True)
-
-print("\ninstalling a dev package reloads everything, not just the lists")
-_reloads = []
-_real_reload = window.reload_all
-window.reload_all = lambda *a, **k: (_reloads.append(1), _real_reload(*a, **k))[1]
-class _FakeInstallDialog:
-    def __init__(self, *a, **k):
-        self.installed = ["rig_utils"]
-    def exec(self):
-        return 1
-import bootycall.ui.main_window as _mw  # noqa: E402
-_real_dialog = _mw.InstallPackageDialog
-_mw.InstallPackageDialog = _FakeInstallDialog
-window.show_install_dialog()
-_mw.InstallPackageDialog = _real_dialog
-window.reload_all = _real_reload
-check(
-    "a new package invalidates the shadow scan and the resolve cache too, "
-    "so the whole window is rebuilt",
-    _reloads == [1],
-    str(_reloads),
-)
 
 print("\nstale setups fail loudly, not silently")
 window.store.add(SavedConfig("Gone show", "deleted_show", "nuke", "nuke16"))

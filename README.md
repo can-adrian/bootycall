@@ -122,14 +122,14 @@ and the show field's prompt is gone anyway once a show is pinned.
 
 ## The three package sections
 
-Installed Dev Packages opens on startup; the other two are shut, since the
+Dev Packages opens on startup; the other two are shut, since the
 resolve alone is 30-odd lines you rarely need. Every header carries a badge, so
 a closed section still reports what is inside it:
 
 ```
   ▸ Resolved packages                    nuke - 30 packages   2 overridden locally
 ☑ ▸ Local packages                            4 packages      1 in use
-☑ ▾ Installed Dev Packages                    8 packages      1 in use  2 outranked
+☑ ▾ Dev Packages                     6 installed · 2 not      1 in use  2 outranked
 ```
 
 ### Switching a section off
@@ -160,10 +160,16 @@ badge is one the resolve names and then takes from somewhere else, split by
 *why*: **outranked** (a higher version of the same name won) and **unusable**
 (the version could never satisfy the request). Several can be true at once,
 which is why they are separate badges rather than one label that changes
-colour — and they use the same words the rows do, so the header and the list
-cannot appear to disagree.
+colour — and they use the same words *and the same colours* the rows do, so the
+header and the list cannot appear to disagree. A row that will be in the
+environment is amber like the *in use* badge; one that lost, whether outranked
+or unusable, is red like the alert that counts it.
 
-**Installed Dev Packages opens by default** — it is the one you watch while
+Anything a row says in brackets — *(symlinked)*, *(not installed)*, *(older
+build)*, *(show package)* — is set in italic. The upright half is the package;
+the italic half is what this window worked out about it.
+
+**Dev Packages opens by default** — it is the one you watch while
 working — and does not spend a row on its path, since a section that stays open
 pays for that line every time you look at it. The root and the *not in your rez
 packages path* warning are on the header's tooltip instead. Local packages keep
@@ -175,7 +181,7 @@ closing never shrinks it, since that would undo a size you chose.
 | Section | Root |
 |---|---|
 | Local packages | `/ice/rez/packages/local/<user>` |
-| Installed Dev Packages | `/ice/rez/packages/local/<user>/dev` |
+| Dev Packages | `/ice/rez/packages/local/<user>/dev`, plus anything in the working location that is not installed |
 
 And one root that is not a section, because nothing resolves out of it:
 
@@ -269,21 +275,25 @@ Two locations, and the whole feature is the gap between them.
 
 * The **dev working location** (`~/dev`) is where you edit. Checkouts, branches,
   half-finished thoughts.
-* **Installed Dev Packages** (`<local>/dev`) is what rez actually resolves.
+* **Dev Packages** (`<local>/dev`) is what rez actually resolves.
 
 Editing the installed copy directly is how a half-written build ends up inside a
 running DCC, so BootyCall never blurs the two. Both paths are in Settings.
 
-#### Install Package
+#### Installing one
 
-Right-click the Installed Dev Packages list — including on empty space, which is
-where you will be right-clicking when you have nothing installed yet. The dialog
-lists the working location and says, per row, whether each folder is a package
-rez could install; the ones that are not stay visible and greyed with the reason,
-because a browser that hides the folder you were looking for is worse than one
-that tells you why it cannot use it.
+**Everything in the working location is a row in the list**, installed or not.
+The ones that are not are greyed, marked *(not installed)*, and their tick is
+drawn but dead — enabling a package that is not there would be a promise the
+resolve then breaks. Right-click one to install or link it.
 
-Two ways out, and they are genuinely different:
+This used to be a second window that browsed the working location. It was a
+dialog whose whole job was to list a directory the settings already name, and
+what it showed you was the same list you were already looking at, minus half of
+it. Showing the lot is the same information with the trip removed: what is in
+play, and what could be.
+
+Two ways to make one real, and they are genuinely different:
 
 * **Install** runs `rez-build --clean --install --prefix <dev root>` in the
   working copy. `rez-build` rather than a copy, because a package that builds is
@@ -340,8 +350,8 @@ would be an invention.
 
 #### Using only some of them
 
-Every row in Installed Dev Packages has its own tick. Untick one and it stays out
-of the resolve, with the studio version used instead. Only the off ones are
+Every installed row in Dev Packages has its own tick. Untick one and it stays
+out of the resolve, with the studio version used instead. Only the off ones are
 saved, so a package you install tomorrow is in play without you going to find it.
 
 Local packages have no per-row ticks — that root is a whole-root decision, and a
@@ -957,6 +967,7 @@ python/bootycall/
     favorites_window.py the favourites manager
     flow_layout.py      wrapping layout for the software row
     main_window.py
+    package_delegate.py the package rows: asides in italic
     style.py
   app.py             application entry point
 tests/
