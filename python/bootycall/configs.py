@@ -44,13 +44,24 @@ class SavedConfig:
     dcc: str
     tool: str
     created: str = ""
+    #: Which software tiles were on the row when this was saved. A setup used
+    #: to record only show/dcc/tool, and applying one whose DCC had since been
+    #: hidden from the Softwares menu failed with "the show does not offer it
+    #: any more" -- which was not true, and sent you looking at the show.
+    #:
+    #: Empty for a setup saved before this existed, which is not the same as
+    #: "no software": those are restored by turning the setup's own DCC on and
+    #: leaving the rest of the row alone.
+    software: tuple[str, ...] = ()
 
     @property
     def summary(self) -> str:
         return "%s - %s" % (self.show, self.tool)
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        data = asdict(self)
+        data["software"] = list(self.software)
+        return data
 
     @classmethod
     def from_dict(cls, data: dict) -> "SavedConfig | None":
@@ -63,12 +74,20 @@ class SavedConfig:
             return None
         if not (name and show and dcc and tool):
             return None
+
+        raw = data.get("software")
+        software: tuple[str, ...] = ()
+        if isinstance(raw, list):
+            software = tuple(
+                dict.fromkeys(str(v).strip() for v in raw if str(v).strip())
+            )
         return cls(
             name=name,
             show=show,
             dcc=dcc,
             tool=tool,
             created=str(data.get("created", "")),
+            software=software,
         )
 
 

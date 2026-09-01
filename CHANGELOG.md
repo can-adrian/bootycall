@@ -10,6 +10,30 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.12.0
+
+Minor: saved setups carry one more thing, and unticked dev builds stop going quiet.
+
+- **Saved setups record the software row, and applying one restores it.**
+  Applying a setup whose DCC you had since hidden from the Softwares menu
+  failed with *"batman_returns does not offer nuke any more"* — which was not
+  true. The show offered it; the tile did not exist because the menu had been
+  changed. The error sent you to look at the wrong thing.
+
+  A setup now stores which tiles were on the row, and applying one puts them
+  back before it goes looking for the tile. A setup saved before this existed
+  has no row to restore, so it turns on its own DCC and leaves the rest alone —
+  the smallest change that makes the setup work, rather than clearing a row you
+  arranged for other reasons. Only writes when something actually differs.
+
+- **An unticked dev package keeps saying what it would do.** It used to go
+  plain grey, which is the colour of a row with nothing to say about the
+  resolve — so unticking a build hid the fact that ticking it would change the
+  launch. It now reads `would override nuke_utils-4` in the same hue as *in
+  use*, darker. It is still not counted in the *in use* badge, because it is
+  not in use; the count is about what the launch will do and that has not
+  changed.
+
 ## 0.11.2
 
 Patch: a successful install reported as a failure, and a guard on your source.

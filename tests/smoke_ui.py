@@ -1897,8 +1897,35 @@ _marked = [
 ]
 check(
     "and an unticked package stops claiming to override anything",
-    all("overrides" not in t for t in _marked),
+    all("      overrides" not in t for t in _marked),
     str(_marked),
+)
+
+# Unticking it does not make it irrelevant to this show: it is still one of
+# yours that the resolve names, and the row has to say ticking it would
+# change the launch.
+_standby = [
+    window.dev_list.item(i)
+    for i in range(window.dev_list.count())
+    if window.dev_list.item(i).data(_NAME_ROLE) == _first
+]
+_relevant = [i for i in _standby if "would override" in i.text()]
+check(
+    "it says what ticking it would do instead",
+    bool(_relevant),
+    str([i.text() for i in _standby]),
+)
+check(
+    "in the same hue as 'in use', darker - not the grey of a row with nothing "
+    "to say",
+    all(i.foreground().color().name() == mw_mod._ROW_STANDBY for i in _relevant),
+    str([(i.text(), i.foreground().color().name()) for i in _relevant]),
+)
+check(
+    "and it is still not counted as in use, because it is not",
+    "in use" not in window.dev_frame.note.text()
+    or window.dev_frame.note.text() == "",
+    window.dev_frame.note.text(),
 )
 
 print("\nan unticked dev package leaves the resolve through a filtered root")
@@ -3213,7 +3240,60 @@ check("show restored", window.current_project().name == "batman_returns")
 check("dcc restored", window._active_dcc.name == "nuke")
 check("variant restored", window._current_tool() == "nuke16")
 check("launch enabled", window.launch_button.isEnabled())
+check(
+    "the software row it was saved with came back too",
+    "nuke" in window._visible_software,
+    str(window._visible_software),
+)
 shot(window, "09-applied-setup")
+
+# The bug: a setup whose DCC has since been hidden from the Softwares menu.
+# The tile does not exist, and applying used to report that as "the show does
+# not offer it any more" -- which was not true, and sent you to look at the
+# show rather than at the menu you had changed.
+window._software_actions["nuke"].setChecked(False)
+QApplication.processEvents()
+check("nuke is hidden", "nuke" not in window._visible_software, str(window._visible_software))
+check("and has no tile", "nuke" not in window._dcc_buttons, str(list(window._dcc_buttons)))
+
+unpin_all()
+window._on_apply_config("Nightly comp")
+QApplication.processEvents()
+check(
+    "applying turns its software back on rather than failing",
+    "nuke" in window._visible_software,
+    str(window._visible_software),
+)
+check("the tile is back", "nuke" in window._dcc_buttons, str(list(window._dcc_buttons)))
+check("and it is selected", window._active_dcc.name == "nuke", str(window._active_dcc))
+check("with its variant", window._current_tool() == "nuke16", str(window._current_tool()))
+check("no error", window.status_label.property("level") != "error", window.status_label.text())
+check(
+    "and the change is saved, so the menu agrees next launch",
+    "nuke" in (window.store.visible_software() or ()),
+    str(window.store.visible_software()),
+)
+
+# A setup saved before the software row was recorded restores nothing but its
+# own DCC: it has no row to put back, and clearing one the user arranged for
+# other reasons would be worse than leaving it alone.
+_old_style = mw_mod.SavedConfig(
+    name="Legacy", show="batman_returns", dcc="blender", tool="blender"
+)
+check("it has no software of its own", _old_style.software == ())
+window.store.add(_old_style)
+_before = set(window._visible_software)
+window._on_apply_config("Legacy")
+QApplication.processEvents()
+check("its own DCC is turned on", "blender" in window._visible_software)
+check(
+    "and everything already on is left alone",
+    _before <= set(window._visible_software),
+    "%s -> %s" % (sorted(_before), sorted(window._visible_software)),
+)
+window.store.remove("Legacy")
+window._rebuild_file_menu()
+rows = [a for a in window.file_menu.actions() if isinstance(a, ConfigMenuAction)]
 
 print("\nthe x removes the row and persists")
 rows[1].item.remove_button.click()

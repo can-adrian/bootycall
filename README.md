@@ -354,6 +354,12 @@ Every installed row in Dev Packages has its own tick. Untick one and it stays
 out of the resolve, with the studio version used instead. Only the off ones are
 saved, so a package you install tomorrow is in play without you going to find it.
 
+An unticked package does not go grey. It keeps saying what ticking it would do
+— `would override nuke_utils-4` — in the same hue as *in use*, darker.
+Unticking a build does not make it irrelevant to the show; it just is not in
+play right now, and a row that went blank hid the fact that one click would
+change the launch. It is still not counted as *in use*, because it is not.
+
 Local packages have no per-row ticks — that root is a whole-root decision, and a
 column of boxes there would be clutter.
 
@@ -750,7 +756,8 @@ directory can't leave the file half-updated.
 
 **File → Save current setup…** (or Ctrl+S, or the favourites window's **Add
 current**) stores
-the current show + DCC + variant under a name you pick. Every saved setup then
+the current show + DCC + variant **and the software row** under a name you
+pick. Every saved setup then
 appears in the File menu, with the show and tool shown greyed on the right and
 an **✕** on the far right:
 
@@ -779,6 +786,12 @@ Setups live in `~/.config/bootycall/configs.json` (override with
 plain JSON and safe to hand-edit or drop into dotfiles. A corrupt or
 partially-valid file never stops the app from opening: unreadable rows are
 dropped, the rest load, and the reason goes to the status bar.
+
+Applying one turns its software back on before it looks for the tile. A DCC
+hidden from the Softwares menu has no button, and reporting that as *the show
+no longer offers it* was a lie that sent you to look at the show instead of the
+menu you had changed. A setup saved before the row was recorded has nothing to
+restore, so it turns on its own DCC and leaves the rest of the row alone.
 
 Setups are validated on use, not on load — shows get archived and bootstraps get
 edited. If a saved setup points at a show that's gone, a DCC the show no longer

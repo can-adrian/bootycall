@@ -99,6 +99,11 @@ _ROW_IN_USE = "#e0a23c"      # the "N in use" note
 _ROW_LOST = "#e06c75"        # the "N outranked / N unusable" alert
 _ROW_QUIET = "#90a8c2"       # says nothing about the resolve
 _ROW_PLAIN = "#d7dae0"
+#: Same hue as "in use", darker: a dev build the resolve names that is
+#: switched off. Unticking one does not make it stop being relevant to this
+#: show -- it just is not in play right now -- and painting it plain hid the
+#: fact that ticking it would change the launch.
+_ROW_STANDBY = "#a3762c"
 
 #: Shown under the logo in quotes, one at random per launch. Stored unquoted so
 #: the list stays the source of truth for the text itself.
@@ -704,7 +709,16 @@ class MainWindow(QMainWindow):
                 return
 
         error = self.store.add(
-            SavedConfig(name=name, show=project.name, dcc=dcc.name, tool=tool)
+            SavedConfig(
+                name=name,
+                show=project.name,
+                dcc=dcc.name,
+                tool=tool,
+                # The software row is part of the setup. Without it, applying a
+                # setup whose DCC you have since hidden fails, and blames the
+                # show for it.
+                software=tuple(self._visible_software),
+            )
         )
         self._rebuild_file_menu()
         if self._favorites_window is not None:
@@ -736,6 +750,42 @@ class MainWindow(QMainWindow):
             return
         self.statusBar().showMessage("Removed setup '%s'" % name, 5000)
 
+    def _restore_software(self, saved: SavedConfig) -> None:
+        """Put the software row back the way the setup had it.
+
+        A setup saved before the row was recorded has nothing to restore, so
+        this turns its own DCC on and leaves the rest alone -- the smallest
+        change that makes the setup work, rather than clearing a row the user
+        arranged for other reasons.
+
+        Only writes when something actually differs: applying a setup you are
+        already set up for should not rewrite the config file or rebuild the
+        tiles.
+        """
+        wanted = list(saved.software) or list(self._visible_software)
+        if saved.dcc not in wanted:
+            wanted.append(saved.dcc)
+
+        order = [d.name for d in config.DCCS]
+        known = [n for n in dict.fromkeys(wanted) if n in order]
+        known.sort(key=order.index)
+        if known == list(self._visible_software):
+            return
+
+        self._visible_software = known
+        for dcc_name, action in self._software_actions.items():
+            # Blocked: the menu is being told what is true, not asked to do it
+            # again once per tile.
+            action.blockSignals(True)
+            action.setChecked(dcc_name in known)
+            action.blockSignals(False)
+
+        error = self.store.set_visible_software(known)
+        if error:
+            self.statusBar().showMessage(error, 8000)
+        self._reapply_software()
+        QApplication.processEvents()
+
     def _on_apply_config(self, name: str) -> None:
         saved = self.store.get(name)
         if saved is None:
@@ -753,6 +803,11 @@ class MainWindow(QMainWindow):
         # favourite is a stronger statement of intent than the chip row.
         self.chip_bar.add(saved.show)
         QApplication.processEvents()
+
+        # Put the software row back before looking for the tile. A hidden DCC
+        # has no button, and reporting that as "the show no longer offers it"
+        # was a lie that sent you to look at the show.
+        self._restore_software(saved)
 
         button = self._dcc_buttons.get(saved.dcc)
         if button is None:
@@ -1872,6 +1927,18 @@ class MainWindow(QMainWindow):
                 else {}
             )
 
+            # The same scan over the packages that are switched off, so a
+            # build you unticked can still say it would be in play. It never
+            # feeds the counts -- those are about what the launch will do --
+            # only the colour and wording of its own row.
+            standby: dict = {}
+            if listing is self.dev_list and frame.is_checked():
+                off = [
+                    p for p in self._dev_packages if p.name in self._disabled_dev
+                ]
+                if off:
+                    standby = shadowed_requests(off, requests)
+
             # Each list is newest-first per name, and rez resolves the highest
             # version that satisfies the request, so only the first entry for a
             # given name actually wins. Marking all three of someone's
@@ -1917,6 +1984,25 @@ class MainWindow(QMainWindow):
                 elif shadow is not None:
                     item.setText("%s      (older build)" % base)
                     item.setForeground(QColor(_ROW_QUIET))
+                elif name in standby and name not in marked:
+                    marked.add(name)
+                    off_shadow = standby[name]
+                    # "would": the tick is off, and the empty box beside the
+                    # row already says so, so the words spend themselves on
+                    # what ticking it would do instead of repeating the state.
+                    # A build that cannot satisfy the request still cannot,
+                    # switched off or on, so that one keeps the plain wording.
+                    item.setText(
+                        "%s      %s %s"
+                        % (
+                            base,
+                            "does not satisfy"
+                            if off_shadow.blocked
+                            else "would override",
+                            off_shadow.request,
+                        )
+                    )
+                    item.setForeground(QColor(_ROW_STANDBY))
                 else:
                     item.setText(base)
                     item.setForeground(QColor(_ROW_PLAIN))
