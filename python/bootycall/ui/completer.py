@@ -110,12 +110,60 @@ class ProjectLineEdit(QLineEdit):
         if event.key() == Qt.Key_Down and not self._completer.popup().isVisible():
             self._show_all() if not self.text() else self._completer.complete()
             return
+
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter) and self._take_completion():
+            return
+
         super().keyPressEvent(event)
+
+    def _take_completion(self) -> bool:
+        """Enter with the list open takes the highlighted row, or the first.
+
+        QCompleter only acts on Enter when a row is *current*, and typing does
+        not make one current -- you have to press Down first. So typing ``bat``,
+        seeing ``batman_returns`` at the top of the list and pressing Enter did
+        nothing at all: no chip, and the text left sitting in the field. The
+        row you are looking at is the one you meant.
+
+        Handled here rather than through ``activated`` so the popup is shut
+        before anything else runs. QCompleter writes the chosen text into the
+        field *after* its own signal, which is why the click path below has to
+        defer around it; hiding the popup first means there is no such write to
+        work around, and the chip appears on the keystroke.
+        """
+        popup = self._completer.popup()
+        if not popup.isVisible() or not self._completer.completionCount():
+            return False
+
+        index = popup.currentIndex()
+        self._completer.setCurrentRow(index.row() if index.isValid() else 0)
+        name = self._completer.currentCompletion()
+        project = self._projects.get(name)
+        if project is None:
+            return False
+
+        popup.hide()
+        self.setText(name)
+        self._revalidate()
+        self.projectActivated.emit(project)
+        return True
 
     def _show_all(self) -> None:
         if self._model.rowCount():
             self._completer.setCompletionPrefix("")
             self._completer.complete()
+
+    def reset(self) -> None:
+        """Empty the field and forget what was being completed.
+
+        ``clear()`` alone leaves the popup open over the window, still listing
+        the show you just pinned, and leaves the completion prefix behind it --
+        so the next press of Down offered a list filtered by text that was no
+        longer there. The field looked empty and behaved as though it was not.
+        """
+        self.clear()
+        self._completer.popup().hide()
+        self._completer.setCompletionPrefix("")
 
     # -- state -------------------------------------------------------------
 
@@ -123,6 +171,7 @@ class ProjectLineEdit(QLineEdit):
         self._revalidate()
 
     def _on_completer_activated(self, text: str) -> None:
+        """A row was clicked. (Enter is handled in :meth:`_take_completion`.)"""
         self.setText(text)
         self._revalidate()
         project = self._current
@@ -130,10 +179,15 @@ class ProjectLineEdit(QLineEdit):
             return
         # Deferred by one turn: QCompleter writes the chosen text into the line
         # edit through its own connection *after* this slot returns, so pinning
-        # here would be immediately undone by that write.
+        # here would be immediately undone by that write. The popup is closed
+        # in the same turn as the pin, so a click leaves nothing behind.
+        self._completer.popup().hide()
         QTimer.singleShot(0, lambda: self.projectActivated.emit(project))
 
     def _on_return_pressed(self) -> None:
+        # Reached only with the list closed: an open one is taken by
+        # _take_completion before Qt gets this far.
+        #
         # Enter on an exact-but-unselected match should still count.
         if self._current is None:
             match = self._unique_match(self.text())

@@ -163,6 +163,86 @@ check(
     window.project_field.text() == "",
     window.project_field.text(),
 )
+check(
+    "and the list closed with it, rather than hanging over the window",
+    not window.project_field._completer.popup().isVisible(),
+)
+unpin_all()
+
+print("\nEnter takes the row you are looking at")
+_field = window.project_field
+_popup = _field._completer.popup()
+
+# QCompleter only acts on Enter when a row is *current*, and typing does not
+# make one current. So typing 'bat', seeing batman_returns at the top of the
+# list and pressing Enter did nothing at all: no chip, and the text left in
+# the field. The row you can see is the row you meant.
+_field.reset()
+QTest.keyClicks(_field, "bat")
+QApplication.processEvents()
+check(
+    "the list is open with more than one match",
+    _popup.isVisible() and _field._completer.completionCount() > 1,
+    "%s / %d" % (_popup.isVisible(), _field._completer.completionCount()),
+)
+QTest.keyClick(_field, Qt.Key_Return)
+for _ in range(3):
+    QApplication.processEvents()
+check(
+    "Enter pins the top row rather than doing nothing",
+    "batman_returns" in window.chip_bar.names(),
+    str(window.chip_bar.names()),
+)
+check("the text went with it", _field.text() == "", _field.text())
+check("and the list closed", not _popup.isVisible())
+check(
+    "and nothing is left being completed, so the next Down offers every show",
+    _field._completer.completionPrefix() == "",
+    _field._completer.completionPrefix(),
+)
+_field.setFocus()
+QTest.keyClick(_field, Qt.Key_Down)
+QApplication.processEvents()
+check(
+    "which it does",
+    _field._completer.completionModel().rowCount() == _field._model.rowCount(),
+    "%d of %d"
+    % (
+        _field._completer.completionModel().rowCount(),
+        _field._model.rowCount(),
+    ),
+)
+
+# A highlighted row wins over the top one, or Down would be decoration.
+_field.reset()
+QTest.keyClicks(_field, "o")
+QApplication.processEvents()
+_model = _field._completer.completionModel()
+_wanted = _model.index(_model.rowCount() - 1, 0)
+_wanted_name = _wanted.data()
+_popup.setCurrentIndex(_wanted)
+QTest.keyClick(_field, Qt.Key_Return)
+for _ in range(3):
+    QApplication.processEvents()
+check(
+    "the highlighted row is the one pinned, not the first",
+    _wanted_name in window.chip_bar.names(),
+    "wanted %s, got %s" % (_wanted_name, window.chip_bar.names()),
+)
+
+# Text matching nothing must still sit there to be corrected.
+_field.reset()
+QTest.keyClicks(_field, "zzz")
+QApplication.processEvents()
+_before_chips = list(window.chip_bar.names())
+QTest.keyClick(_field, Qt.Key_Return)
+QApplication.processEvents()
+check(
+    "text that matches no show is left alone to be fixed",
+    _field.text() == "zzz" and window.chip_bar.names() == _before_chips,
+    "%r / %s" % (_field.text(), window.chip_bar.names()),
+)
+_field.reset()
 unpin_all()
 
 print("\nchips are pills")

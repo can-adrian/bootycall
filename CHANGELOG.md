@@ -10,6 +10,30 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.12.2
+
+Patch: the show field does what it looks like it does.
+
+- **Enter takes the row you can see.** `QCompleter` only acts on Enter when a
+  row is *current*, and typing does not make one current — you have to press
+  Down first. So typing `bat`, seeing `batman_returns` at the top of the open
+  list and pressing Enter did nothing at all: no chip, and the text left in the
+  field. The highlighted row is taken now, or the first one if you have not
+  moved. Text matching no show is still left alone, so a typo can be corrected
+  rather than silently discarded.
+
+  Handled before Qt sees the keystroke, so the list is shut before anything
+  else runs — which also means the pin happens on the keystroke rather than a
+  turn later, with no flash of the name landing in the field first.
+
+- **Pinning clears the completion, not just the text.** `clear()` left the list
+  open over the window, still showing the show you had just pinned, and left
+  the completion prefix behind it — so the next press of Down offered a list
+  filtered by text that was no longer there. The field looked empty and behaved
+  as though it was not.
+
+- Clicking a row closes the list in the same turn it pins.
+
 ## 0.12.1
 
 Patch: find the link wherever it is, and let Diagnostics answer the question.

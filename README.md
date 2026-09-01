@@ -98,6 +98,19 @@ there are chips in the field — they say what it is for.
 Enter on a show that's already pinned selects it instead of adding a second chip
 — hitting Enter twice on the same name should be idempotent, not an error. The
 field clears itself after each pin so you can type the next one straight away.
+
+**Enter takes whichever row you can see.** `QCompleter` acts on Enter only when
+a row is *current*, and typing does not make one current — you have to press
+Down first. So typing `bat`, seeing `batman_returns` at the top of the open
+list and pressing Enter did nothing: no chip, and the text still sitting there.
+BootyCall takes the highlighted row, or the first one if you have not moved,
+and pins it. Text matching no show at all is left alone, so you can correct it.
+
+Pinning closes the list and forgets the prefix, as well as clearing the text.
+Clearing the field alone left the list open over the window still showing the
+show you had just pinned, and left the prefix behind it — so the next press of
+Down offered a list filtered by text that was no longer there. The field looked
+empty and behaved as though it was not.
 **Backspace on an empty entry** removes the last chip, as a token field should.
 
 The border and focus ring belong to the box; the entry inside is chrome-free, so

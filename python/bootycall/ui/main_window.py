@@ -849,7 +849,10 @@ class MainWindow(QMainWindow):
     def _on_show_entered(self, project: Project) -> None:
         """Enter in the autocomplete field: pin the show and select it."""
         added = self.chip_bar.add(project.name)
-        self.project_field.clear()
+        # reset(), not clear(): the popup and the completion prefix are part of
+        # what was typed, and leaving them behind is what made the field look
+        # like it had not been emptied.
+        self.project_field.reset()
         self.project_field.setFocus()
         if not added:
             self.statusBar().showMessage(
