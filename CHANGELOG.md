@@ -10,6 +10,22 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.15.2
+
+Patch: the terminal names the packages this window added.
+
+- **`(appended)`, in blue**, beside every package BootyCall put in the request
+  list itself: `axiom-3.1.0  (dev)  (appended)`. The note above the list said
+  what had been added; the list itself still showed them looking like anything
+  else of yours that happened to resolve.
+
+- The launch **exports `BOOTYCALL_APPENDED`** — the names it added, space
+  separated — and the report reads it from the environment. An environment
+  variable rather than a third sequence threaded through the dozen functions
+  that already carry `roots` and `notes`: this is a fact about the environment,
+  the report already reads the environment for everything else it says about
+  packages, and anything else in the session can now ask the same question.
+
 ## 0.15.1
 
 Patch: the terminal could not see a live install.

@@ -697,6 +697,55 @@ check(
     str(_dev.live_links(_live / "dev/live/1.0.0/python-3.9")),
 )
 
+print("\nand a package this window added says so, in its own colour")
+# The show never asked for it, so it is not the show's environment with a build
+# of yours in it -- it is something else again. The list has to say which.
+_add = Path(tempfile.mkdtemp(prefix="bootycall-added-"))
+(_add / "dev" / "axiom" / "3.1.0").mkdir(parents=True)
+(_add / "dev" / "houdini_utils" / "6.1.0").mkdir(parents=True)
+_add_banner = launcher.launch_banner((("dev", str(_add / "dev")),))
+_add_env = {
+    "PATH": os.environ.get("PATH", ""),
+    launcher.APPENDED_ENV: "axiom",
+    "REZ_AXIOM_ROOT": str(_add / "dev/axiom/3.1.0"),
+    "REZ_AXIOM_VERSION": "3.1.0",
+    "REZ_HOUDINI_UTILS_ROOT": str(_add / "dev/houdini_utils/6.1.0"),
+    "REZ_HOUDINI_UTILS_VERSION": "6.1.0",
+}
+for _shell in ("sh", "dash", "bash"):
+    if shutil.which(_shell) is None:
+        continue
+    _out = subprocess.run(
+        [_shell, "-c", _add_banner], capture_output=True, text=True, env=_add_env
+    ).stdout
+    check(
+        "%s: the added one is marked" % _shell,
+        "axiom-3.1.0  (dev)  (appended)" in _out,
+        _out,
+    )
+    check(
+        "%s: and one the show asked for is not" % _shell,
+        "houdini_utils-6.1.0  (dev)\n" in _out,
+        _out,
+    )
+
+# A name that is a prefix of another must not match: "axiom" is not "axiom_ui".
+_add_env[launcher.APPENDED_ENV] = "axiom_ui"
+_none = subprocess.run(
+    ["bash", "-c", _add_banner], capture_output=True, text=True, env=_add_env
+).stdout
+check(
+    "membership is whole names, not substrings",
+    "(appended)" not in _none,
+    _none,
+)
+
+check(
+    "the launch declares it in the environment rather than in a fourth argument",
+    launcher.APPENDED_ENV == "BOOTYCALL_APPENDED",
+    launcher.APPENDED_ENV,
+)
+
 print("\nand it survives rez re-quoting the command")
 # rez does not run the argv it is handed. It writes the whole thing into a
 # rez-shell.sh of its own, inside double quotes, and runs that. Anything

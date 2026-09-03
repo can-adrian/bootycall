@@ -23,6 +23,7 @@ from typing import Sequence
 
 from . import config
 from .discovery import Project
+from .local_packages import request_name
 
 #: Cached answer from :func:`packages_path`. Asking rez costs a subprocess, and
 #: the value does not change while BootyCall is open.
@@ -323,7 +324,7 @@ def launch_banner(
             # needs somewhere to stop, and "the root this package was found
             # under" is the only honest boundary.
             '            if (index(p, r%d "/") == 1) '
-            '{ print n, l%d, r%d, p; continue }' % (i, i, i)
+            '{ print n, bare, l%d, r%d, p; continue }' % (i, i, i)
             for i in range(len(roots))
         )
         # Colour per label, chosen in the shell rather than baked into awk's
@@ -347,7 +348,8 @@ def launch_banner(
             "    }",
             "    END {",
             "        for (k in root) {",
-            '            n = (ver[k] != "" ? tolower(k) "-" ver[k] : tolower(k))',
+            '            bare = tolower(k)',
+            '            n = (ver[k] != "" ? bare "-" ver[k] : bare)',
             "            p = root[k]",
             tests,
             "        }",
@@ -360,7 +362,7 @@ def launch_banner(
             # prints as it goes rather than accumulating anything the rest of
             # the script needs.
             "    printf '%s\\n' \"$_bc_hits\" |",
-            "    while read -r _bc_name _bc_label _bc_root _bc_path; do",
+            "    while read -r _bc_name _bc_bare _bc_label _bc_root _bc_path; do",
             "        _bc_c=$_bcG",
             '        case "$_bc_label" in',
             cases,
@@ -399,8 +401,19 @@ def launch_banner(
             '                fi',
             '            done',
             '        fi',
+            # Packages this window put in the request list itself. The show
+            # never asked for them, so they are not the show's environment with
+            # a build of yours in it -- they are something else again, and get
+            # their own word and their own colour.
+            "        _bc_extra=",
+            '        case " $%s " in' % APPENDED_ENV,
+            '            *" $_bc_bare "*)',
+            "                _bc_extra='  (appended)'",
+            "                _bc_c=$_bcC",
+            "                ;;",
+            "        esac",
             "        printf '%s\\n'"
-            ' "    ${_bc_c}${_bc_name}  (${_bc_label})${_bc_link}${_bc0}"',
+            ' "    ${_bc_c}${_bc_name}  (${_bc_label})${_bc_link}${_bc_extra}${_bc0}"',
             "    done",
             "else",
             "    printf '%s\\n'"
@@ -705,6 +718,7 @@ def launch(
     dry_run: bool = False,
     roots: Sequence[tuple[str, str]] = (),
     notes: Sequence[tuple[str, str]] = (),
+    appended: Sequence[str] = (),
 ) -> subprocess.Popen | None:
     """Resolve ``packages`` and start ``command``, detached."""
     return _spawn(
@@ -713,6 +727,7 @@ def launch(
         exclude_roots,
         include_roots,
         dry_run,
+        appended,
     )
 
 
@@ -724,6 +739,7 @@ def open_terminal(
     dry_run: bool = False,
     roots: Sequence[tuple[str, str]] = (),
     notes: Sequence[tuple[str, str]] = (),
+    appended: Sequence[str] = (),
 ) -> subprocess.Popen | None:
     """Open a shell resolved against ``packages``, detached."""
     return _spawn(
@@ -732,7 +748,19 @@ def open_terminal(
         exclude_roots,
         include_roots,
         dry_run,
+        appended,
     )
+
+
+#: Names BootyCall put in the request list itself, space separated, exported
+#: into the launched environment.
+#:
+#: An environment variable rather than a third sequence threaded through the
+#: dozen functions that already carry ``roots`` and ``notes``: the report reads
+#: what is in the environment, and this *is* something about the environment.
+#: It also means the banner needs no new argument at all, and anything else in
+#: the session can ask the same question.
+APPENDED_ENV = "BOOTYCALL_APPENDED"
 
 
 def _spawn(
@@ -741,6 +769,7 @@ def _spawn(
     exclude_roots: Sequence[str] = (),
     include_roots: Sequence[str] = (),
     dry_run: bool = False,
+    appended: Sequence[str] = (),
 ) -> subprocess.Popen | None:
     if dry_run:
         return None
@@ -752,6 +781,7 @@ def _spawn(
     # package reads a name nobody set fails the whole resolve with
     # PackageCommandError, naming the variable.
     env.update(config.show_env(project.name))
+    env[APPENDED_ENV] = " ".join(_rez_env_key(request_name(r)).lower() for r in appended)
 
     # Two reasons to rewrite the path. Switching off a package section means
     # its packages must not reach the resolve, and they are not in the request

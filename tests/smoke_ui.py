@@ -2099,6 +2099,36 @@ check(
     _pick in _banner and "_bcC" in _banner,
     _banner[:400],
 )
+check(
+    "and the package list marks it rather than leaving it to look like the rest",
+    "(appended)" in _banner and launcher.APPENDED_ENV in _banner,
+    _banner[-600:],
+)
+
+# The banner reads the environment; something has to put it there. A launch
+# that reported an append the shell could never see would be the same class of
+# problem as every other half-plumbed feature in this file's history.
+_seen_env = {}
+_real_popen = launcher.subprocess.Popen
+
+
+class _CapturePopen:
+    def __init__(self, argv, **kwargs):
+        _seen_env.update(kwargs.get("env") or {})
+
+    def poll(self):
+        return None
+
+
+launcher.subprocess.Popen = _CapturePopen
+window._on_launch(checked_dev=True)
+QApplication.processEvents()
+launcher.subprocess.Popen = _real_popen
+check(
+    "the launch exports what it appended",
+    _seen_env.get(launcher.APPENDED_ENV, "").split() == [_pick],
+    repr(_seen_env.get(launcher.APPENDED_ENV)),
+)
 
 # Two versions of one name in one request list is a resolve that fails for a
 # reason nobody would guess.

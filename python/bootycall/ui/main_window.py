@@ -2755,6 +2755,7 @@ class MainWindow(QMainWindow):
                 self.included_roots(),
                 roots=self.highlight_roots(),
                 notes=self.launch_notes(),
+                appended=self.appended_requests(),
             )
         except OSError as exc:
             QMessageBox.critical(
@@ -3190,6 +3191,7 @@ class MainWindow(QMainWindow):
                 self.included_roots(),
                 roots=self.highlight_roots(),
                 notes=self.launch_notes(),
+                appended=self.appended_requests(),
             )
         except OSError as exc:
             QMessageBox.critical(

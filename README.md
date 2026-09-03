@@ -519,8 +519,9 @@ switched on, and reached nothing — there was no way to get it into an
 environment from this window at all.
 
 Ticking such a package **appends it to the request list**. The row turns blue
-and says *appended to the environment*, the section header counts it, and the
-launch report says so in the terminal — the environment is no longer the one
+and says *appended to the environment*, the section header counts it, and in
+the terminal the package is listed blue as `axiom-3.1.0  (dev)  (appended)`
+alongside a line saying what was added — the environment is no longer the one
 the show describes, and the session that behaves oddly two hours later should
 not have to guess why. It is reported as information rather than a warning:
 you asked for it.
@@ -1138,6 +1139,14 @@ the ones below, and are handy for pointing a session at a test tree:
 | `BOOTYCALL_SHOW_RESOLVE_INFO` | `1` |
 | `BOOTYCALL_SCRIPT_DIR` | `$TMPDIR`, else the platform default (`/tmp`) |
 | `BOOTYCALL_SHOW_ENV_VARS` | `ILP_SHOW:ILP_CONTEXT_SHOW:SHOW:BOOTYCALL_SHOW` |
+
+`BOOTYCALL_APPENDED` is *set* by a launch rather than read: the space-separated
+names BootyCall added to the request list itself. The launch report reads it to
+mark those packages, and anything else in the session can ask the same
+question. It carries what it carries because that is a fact about the
+environment, which is where facts about the environment belong — the
+alternative was a third sequence threaded through the dozen functions that
+already carry `roots` and `notes`.
 | `BOOTYCALL_LAUNCH_COMMAND` | `<detected terminal> bash -c {script}` |
 | `BOOTYCALL_TERMINAL_COMMAND` | `<detected terminal> bash -c {script}` |
 | `BOOTYCALL_CONFIG_FILE` | `$XDG_CONFIG_HOME/bootycall/configs.json` |
