@@ -91,6 +91,9 @@ _PACKAGE_PATH_ROLE = Qt.UserRole + 1
 #: the roles above -- it is not a package rez can see, and every piece of code
 #: that asks "which package is this row?" must keep skipping it.
 _SOURCE_PATH_ROLE = Qt.UserRole + 2
+#: On an *installed* dev row: the working copy it was built from, when one can
+#: be found. What Re-install rebuilds.
+_BUILT_FROM_ROLE = Qt.UserRole + 3
 
 #: Row colours, matching the counts in the section header exactly. A header
 #: that says "2 outranked" in red over two grey rows makes the reader work out
@@ -1476,8 +1479,12 @@ class MainWindow(QMainWindow):
         except OSError:
             return []
 
+        # By the name the package declares, not the folder it sits in: a
+        # checkout called rig_utils-alembic-properties builds a package called
+        # rig_utils_alembic_properties, and matching on the folder listed it as
+        # "not installed" beside the build it had just produced.
         known = {p.name for p in installed}
-        missing = [w for w in working if w.name not in known]
+        missing = [w for w in working if w.package_name not in known]
         if not missing:
             return missing
 
@@ -1486,7 +1493,10 @@ class MainWindow(QMainWindow):
             listing.takeItem(0)
 
         for package in sorted(missing, key=lambda w: w.name.lower()):
-            item = QListWidgetItem("%s  (not installed)" % package.name)
+            label = package.package_name
+            if package.renamed:
+                label += "  (%s)" % package.name
+            item = QListWidgetItem("%s  (not installed)" % label)
             item.setData(_SOURCE_PATH_ROLE, str(package.path))
             item.setForeground(QColor(_ROW_QUIET))
             # The box is drawn but cannot be ticked: enabling a package that
@@ -1563,16 +1573,33 @@ class MainWindow(QMainWindow):
             # on and off while working; a local package is a whole-root
             # decision and a row of checkboxes there would only be clutter.
             tickable = listing is self.dev_list
+            # Which working copy each installed dev package came from, so a row
+            # can name the folder it was built from and Re-install knows what
+            # to rebuild. Read once for the whole list rather than per row.
+            sources = (
+                dev_install.sources_by_package(self.dev_working_root_path())
+                if tickable
+                else {}
+            )
             for package in packages:
                 # Two spaces, not the six the override marks use: this belongs
                 # to the package's name, not to what the resolve makes of it,
                 # and must survive being remarked.
-                display = package.request + (
-                    "  (symlinked)" if package.is_symlink else ""
-                )
+                display = package.request
+                source = sources.get(package.name)
+                if source is not None and source.renamed:
+                    # Only when the folder is spelled differently from the
+                    # package. Repeating a name the row already carries would
+                    # be noise on every other row.
+                    display += "  (%s)" % source.name
+                if package.is_symlink:
+                    display += "  (symlinked)"
+
                 item = QListWidgetItem(display)
                 item.setData(_PACKAGE_NAME_ROLE, package.name)
                 item.setData(_PACKAGE_PATH_ROLE, str(package.path))
+                if source is not None:
+                    item.setData(_BUILT_FROM_ROLE, str(source.path))
 
                 # A package rez will skip is worth flagging before anything
                 # else this list says about it: an override that rez never
@@ -1723,6 +1750,23 @@ class MainWindow(QMainWindow):
 
         count = len(packages)
         menu = QMenu(self)
+
+        # Re-install only on a single installed dev package that still has a
+        # working copy. Offering it on a selection would need a progress dialog
+        # and a per-package failure report, which is what Update Dev Installs
+        # already is.
+        rebuild_from = (
+            clicked.data(_BUILT_FROM_ROLE)
+            if is_dev and count == 1 and clicked in items
+            else None
+        )
+        rebuild_action = None
+        if rebuild_from:
+            rebuild_action = menu.addAction(
+                "Re-install from %s" % Path(rebuild_from).name
+            )
+            menu.addSeparator()
+
         browse_action = menu.addAction(
             "Browse folder" if count == 1 else "Browse %d folders" % count
         )
@@ -1739,7 +1783,9 @@ class MainWindow(QMainWindow):
         )
 
         chosen = menu.exec(listing.mapToGlobal(point))
-        if chosen is browse_action:
+        if rebuild_action is not None and chosen is rebuild_action:
+            self._build_from(rebuild_from, link=False, verb="Re-install")
+        elif chosen is browse_action:
             self.browse_packages(packages)
         elif chosen is copy_action:
             QApplication.clipboard().setText(
@@ -1773,17 +1819,21 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage(errors[0], 6000)
             return
 
-        link = chosen is link_action
+        self._build_from(source, link=chosen is link_action)
+
+    def _build_from(self, source: str, link: bool, verb: str = "") -> None:
+        """Build or link one working copy into the dev root, then reload."""
         action = dev_install.symlink if link else dev_install.install
+        name = Path(source).name
         self.statusBar().showMessage(
-            "%s %s..." % ("Linking" if link else "Building", Path(source).name)
+            "%s %s..." % ("Linking" if link else "Building", name)
         )
         QApplication.processEvents()
         ok, detail = action(source, dev_root())
         if not ok:
             QMessageBox.critical(
                 self,
-                "Could not %s" % ("link" if link else "install"),
+                "Could not %s" % (verb.lower() or ("link" if link else "install")),
                 "%s\n\n%s" % (source, detail),
             )
             return
@@ -1793,9 +1843,8 @@ class MainWindow(QMainWindow):
         # cached resolve probe answered before it existed -- and a stale cache
         # here is exactly the kind of thing that costs an afternoon.
         self.reload_all()
-        self.statusBar().showMessage(
-            "%s %s" % ("Linked" if link else "Installed", Path(source).name), 8000
-        )
+        done = verb + "ed" if verb else ("Linked" if link else "Installed")
+        self.statusBar().showMessage("%s %s" % (done, name), 8000)
 
     def browse_packages(self, packages: list[LocalPackage]) -> list[str]:
         """Open each package folder in the desktop's file manager."""
@@ -2232,12 +2281,11 @@ class MainWindow(QMainWindow):
         tool = self._current_tool()
         if project is None or tool is None or self._active_dcc is None:
             return
-        preview = launcher.command_preview(
-            project,
-            self.resolved_packages(),
-            self._active_dcc.run_command,
-            self.highlight_roots(),
-            self.launch_notes(),
+        # The rez command alone. The terminal wrapper, the cd and the
+        # reporting preamble are how BootyCall runs it, and pasting a screen of
+        # those into a shell to re-run one resolve helps nobody.
+        preview = launcher.rez_preview(
+            self.resolved_packages(), self._active_dcc.run_command
         )
         QApplication.clipboard().setText(preview)
         self.statusBar().showMessage("Copied: %s" % preview, 5000)

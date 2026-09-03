@@ -637,6 +637,23 @@ def _preview(project: Project, argv: Sequence[str]) -> str:
     )
 
 
+def rez_preview(packages: Sequence[str], command: str = "") -> str:
+    """Just the rez invocation, ready to paste into a shell.
+
+    Not the terminal wrapper, not the ``cd``, not the reporting preamble: those
+    are how BootyCall runs it, and none of them are what you want in your hand
+    when you are about to run the same resolve yourself.
+
+    ``show_info=False`` also keeps this side-effect free. The full argv writes a
+    launch script to disk to get a path to point rez at, and building a preview
+    is not a reason to write a file.
+    """
+    return " ".join(
+        shlex.quote(part)
+        for part in rez_argv(packages, command, show_info=False)
+    )
+
+
 def command_preview(
     project: Project,
     packages: Sequence[str],

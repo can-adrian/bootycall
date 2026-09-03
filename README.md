@@ -245,6 +245,80 @@ highest", not "what will the full resolve do": it does not evaluate variants or
 a package's own requires, so a resolve can still reject a version for reasons no
 directory listing shows.
 
+### How the packages path is actually overridden
+
+Everything above depends on one mechanism, so it is worth having in one place.
+
+**BootyCall never edits your rez config and never writes to your shell.** It
+sets `REZ_PACKAGES_PATH` in the environment of the process it launches, and
+nowhere else (`launcher._spawn`). That variable overrides
+`rez-config packages_path`, so setting it for one child process is the whole
+thing. Close the DCC and nothing about your rez setup has changed.
+
+**1. Find the starting path.** `packages_path()` takes `$REZ_PACKAGES_PATH` if
+it is set, otherwise parses `rez-config packages_path`. Cached for the session;
+**File → Reload** clears it.
+
+If neither works it returns empty, and that is read as *cannot filter*, not
+*the path is empty*. BootyCall then leaves the variable alone rather than
+replacing the site's defaults with a guess, and says so in the status bar.
+
+**2. Build two lists.**
+
+`included_roots()` — prepended, most specific first:
+
+1. the dev root (`<local>/dev`) if that section is ticked
+2. the local root if that section is ticked
+3. the show package root — `<show>/.ilp/packages`, or your user packages root
+
+Only roots that exist on disk. Dev before local because the dev root is nested
+inside the local one and is the more deliberate of the two: you install into it
+on purpose.
+
+`excluded_roots()` — removed:
+
+* the local root if that section is unticked
+* the dev root if that section is unticked
+* **and the dev root when only some of its packages are unticked** — see 4
+
+**3. Splice.** `filtered_packages_path(exclude, include)`:
+
+```python
+kept   = [p for p in current if p not in exclude]   # compared with normpath
+extra  = [p for p in include if p not in kept and isdir(p)]
+result = extra + kept
+```
+
+Roots your site already lists stay exactly where they are — `extra` skips
+duplicates. So this changes nothing at a site whose rez config already names
+your local root, and is the fix at one that does not. It returns a note only
+when an *exclusion did not take*; that note goes to the status bar.
+
+**4. Per-package disable is a directory of symlinks.** Unticking one dev
+package cannot be done with a rez package filter: a filter excludes a *name*,
+and the studio almost certainly ships a package with the same name as your dev
+build — that is the entire reason you made one. Excluding by name would take
+the studio copy out too and fail the resolve.
+
+So `dev_install.selection_view()` builds a temporary directory of links to only
+the packages that are switched on. The real dev root goes into `exclude`, the
+view into `include`. rez looks in the view, does not find what you switched
+off, and carries on to the next root exactly as it would if you had never built
+it. It is only built when something is actually off.
+
+**And the part that costs people days: path order does not decide which version
+wins.** rez takes the highest version satisfying the request across *every*
+root; order only breaks ties between equal versions. Putting your dev root
+first does not make your `rig_utils-1.7` beat the studio's `1.9`.
+
+That is why the lists say `outranked by 1.9.0` rather than `overrides`, why
+`resolves_to()` implements the highest-version rule rather than a first-match
+rule, and why the launch report reads `REZ_<NAME>_ROOT` out of the resolved
+environment instead of predicting from the path. Everything BootyCall says
+about which root a package will come from is a prediction; the launch report
+and **Test resolve with rez** are the only two places it reports what actually
+happened.
+
 ### When a package is not where you expect it
 
 **Edit → Diagnostics** copies a report covering every step between a package
@@ -299,6 +373,23 @@ running DCC, so BootyCall never blurs the two. Both paths are in Settings.
 The ones that are not are greyed, marked *(not installed)*, and their tick is
 drawn but dead — enabling a package that is not there would be a promise the
 resolve then breaks. Right-click one to install or link it.
+
+**Checkouts are paired with their builds by the name the package declares, not
+the folder it sits in.** A checkout called `rig_utils-alembic-properties` whose
+`package.py` says `name = "rig_utils_alembic_properties"` builds a package
+under the latter. Matching on the folder looked right and failed silently for
+every such checkout: the copy showed as *(not installed)* beside the build it
+had just produced, and the staleness check never looked at it again. Where the
+two differ, the row names the folder in brackets:
+
+```
+rig_utils_alembic_properties-0.3.1  (rig_utils-alembic-properties)
+```
+
+Right-click an installed dev package for **Re-install from &lt;folder&gt;**,
+which rebuilds it from that checkout. Offered only on a single package that
+still has a working copy — a selection would want a progress dialog and a
+per-package failure report, and that is what *Update Dev Installs* already is.
 
 This used to be a second window that browsed the working location. It was a
 dialog whose whole job was to list a directory the settings already name, and
@@ -984,8 +1075,14 @@ the ones below, and are handy for pointing a session at a test tree:
 
 Both commands run with the show folder as cwd, which is what a bootstrap's
 `__file__`-relative lookups and anything the DCC opens by relative path both
-expect. The **Copy command** button prints exactly what will run, so you can
-paste it into a shell and check it.
+expect.
+
+**Edit → Copy launch command** puts the rez invocation alone on the clipboard —
+`rez-env base-6 nuke-16.0 … -- nuke` — ready to paste into a shell. Not the
+terminal wrapper, not the `cd`, not the reporting preamble: those are how
+BootyCall runs it, and none of them are what you want in your hand when you are
+about to run the same resolve yourself. It is also side-effect free, where the
+full argv writes a launch script to disk to get a path to point rez at.
 
 `BOOTSTRAP_GLOBS` is also a guess, derived from the three `os.path.dirname()`
 calls in `_get_show_packages()` — that puts the bootstrap three levels below the

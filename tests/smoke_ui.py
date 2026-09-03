@@ -2235,6 +2235,117 @@ check(
     window.dev_frame.badge.text(),
 )
 
+# A checkout whose folder is spelled differently from its package: the row has
+# to name the folder, and installing must not leave a duplicate "not installed"
+# row beside the build it just produced.
+(_work / "rig_utils-alembic-properties").mkdir()
+(_work / "rig_utils-alembic-properties" / "package.py").write_text(
+    'name = "rig_utils_alembic_properties"\nversion = "0.3.1"\n'
+)
+window.refresh_package_lists()
+QApplication.processEvents()
+_renamed_rows = [
+    window.dev_list.item(i).text()
+    for i in range(window.dev_list.count())
+    if "rig_utils" in window.dev_list.item(i).text()
+]
+check(
+    "an uninstalled checkout is listed under its package name, folder in brackets",
+    _renamed_rows == ["rig_utils_alembic_properties  (rig_utils-alembic-properties)"
+                      "  (not installed)"],
+    str(_renamed_rows),
+)
+
+_saved_rename_cmd = cfg_mod.DEV_INSTALL_COMMAND
+cfg_mod.DEV_INSTALL_COMMAND = (
+    "bash", "-c",
+    "mkdir -p $1/rig_utils_alembic_properties/0.3.1 && "
+    "cp package.py $1/rig_utils_alembic_properties/0.3.1/",
+    "x", "{dest}",
+)
+_ok, _detail = _di.install(_work / "rig_utils-alembic-properties", _installed)
+cfg_mod.DEV_INSTALL_COMMAND = _saved_rename_cmd
+check("it installs", _ok, _detail[:200])
+cfg_mod.set_path_overrides(
+    {"dev_root": str(_installed), "dev_working_root": str(_work)}
+)
+window.refresh_package_lists()
+QApplication.processEvents()
+_renamed_rows = [
+    window.dev_list.item(i)
+    for i in range(window.dev_list.count())
+    if "rig_utils" in window.dev_list.item(i).text()
+]
+check(
+    "one row afterwards, not two - the checkout is matched to its build",
+    len(_renamed_rows) == 1,
+    str([r.text() for r in _renamed_rows]),
+)
+check(
+    "and it still names the folder it was built from",
+    _renamed_rows[0].text()
+    == "rig_utils_alembic_properties-0.3.1  (rig_utils-alembic-properties)",
+    _renamed_rows[0].text(),
+)
+check(
+    "which is what Re-install would rebuild",
+    Path(_renamed_rows[0].data(mw_mod._BUILT_FROM_ROLE)).name
+    == "rig_utils-alembic-properties",
+    str(_renamed_rows[0].data(mw_mod._BUILT_FROM_ROLE)),
+)
+
+_relabels = []
+
+
+class _CollectRebuild:
+    def __init__(self, *a, **k):
+        pass
+
+    def addAction(self, label):
+        _relabels.append(label)
+        return label
+
+    def addSeparator(self):
+        pass
+
+    def exec(self, *a):
+        return None
+
+
+window.dev_list.setCurrentItem(_renamed_rows[0])
+_real_menu3 = mw_mod.QMenu
+mw_mod.QMenu = _CollectRebuild
+window._on_package_menu(
+    window.dev_list, window.dev_list.visualItemRect(_renamed_rows[0]).center()
+)
+mw_mod.QMenu = _real_menu3
+check(
+    "and the menu offers it by name",
+    "Re-install from rig_utils-alembic-properties" in _relabels,
+    str(_relabels),
+)
+
+_plain = [
+    window.dev_list.item(i)
+    for i in range(window.dev_list.count())
+    if window.dev_list.item(i).data(mw_mod._PACKAGE_NAME_ROLE)
+    and not window.dev_list.item(i).data(mw_mod._BUILT_FROM_ROLE)
+]
+if _plain:
+    _relabels.clear()
+    window.dev_list.setCurrentItem(_plain[0])
+    mw_mod.QMenu = _CollectRebuild
+    window._on_package_menu(
+        window.dev_list, window.dev_list.visualItemRect(_plain[0]).center()
+    )
+    mw_mod.QMenu = _real_menu3
+    check(
+        "a build with no working copy is not offered a re-install it cannot do",
+        not any(l.startswith("Re-install") for l in _relabels),
+        str(_relabels),
+    )
+
+
 _real_box = mw_mod.QMessageBox
 
 print("\nlaunching checks the installed dev packages against the working copies")
@@ -2387,8 +2498,29 @@ check("enabled once there is something to copy", window.copy_action.isEnabled())
 window._on_copy_command()
 QApplication.processEvents()
 _copied = QApplication.clipboard().text()
-check("copying gives the whole command", "rez-env" in _copied, _copied[:80])
-check("cd'd into the show", "/tmp/ice/shows/batman_returns" in _copied, _copied[:80])
+check("copying gives the rez command", _copied.startswith("rez-env "), _copied[:80])
+check(
+    "with every request and the application in it",
+    all(r in _copied for r in window.resolved_packages())
+    and _copied.endswith("-- nuke"),
+    _copied,
+)
+# The terminal wrapper, the cd and the reporting preamble are how BootyCall
+# runs it. Pasting a screen of those into a shell to re-run one resolve helps
+# nobody, and the launch-script path in it would be stale by the time you did.
+check(
+    "and none of the wrapper around it",
+    not any(
+        noise in _copied
+        for noise in ("cd ", "bash -c", "rez-context", "launch-", "printf")
+    ),
+    _copied,
+)
+check(
+    "building the preview writes nothing to disk",
+    launcher.rez_preview(("a-1",), "maya") == "rez-env a-1 -- maya",
+    launcher.rez_preview(("a-1",), "maya"),
+)
 check("and no footer button is left", not hasattr(window, "copy_button"))
 
 print("\nthe window is a quarter narrower than it was")
@@ -2880,7 +3012,7 @@ check(
 _mismatch = _blocker(_installed, True, _dvi)
 check(
     "and a working location with no matching names explains the mismatch",
-    "matched by directory name" in _mismatch,
+    "the name the package declares" in _mismatch,
     _mismatch,
 )
 check(

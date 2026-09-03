@@ -394,6 +394,72 @@ check("an installed package next door still goes", lp.delete_package(_fine, _gua
 check("really gone", not (_guard / "other_tool").exists())
 config.set_path_overrides({})
 
+print("\na checkout is paired with its build by the name the package declares")
+# The folder is whatever you called your checkout; the package is whatever the
+# definition says. Pairing them by folder name looked right and silently failed
+# for every checkout where the two differ -- the copy showed as "not installed"
+# beside the build it had produced, and the staleness check never looked at it.
+_pair = Path(tempfile.mkdtemp(prefix="bootycall-pair-"))
+_pair_work = _pair / "work"
+(_pair_work / "rig_utils-alembic-properties").mkdir(parents=True)
+(_pair_work / "rig_utils-alembic-properties" / "package.py").write_text(
+    'name = "rig_utils_alembic_properties"\nversion = "0.3.1"\n'
+)
+(_pair_work / "plain_tool").mkdir()
+(_pair_work / "plain_tool" / "package.py").write_text('name = "plain_tool"\n')
+
+_found = {w.name: w for w in di.list_working_packages(_pair_work)}
+check(
+    "the folder name is kept",
+    sorted(_found) == ["plain_tool", "rig_utils-alembic-properties"],
+    str(sorted(_found)),
+)
+check(
+    "and the declared name read alongside it",
+    _found["rig_utils-alembic-properties"].package_name
+    == "rig_utils_alembic_properties",
+    _found["rig_utils-alembic-properties"].package_name,
+)
+check(
+    "a folder spelled like its package is not marked renamed",
+    not _found["plain_tool"].renamed and _found["rig_utils-alembic-properties"].renamed,
+)
+check(
+    "and the two can be looked up by package name",
+    sorted(di.sources_by_package(_pair_work))
+    == ["plain_tool", "rig_utils_alembic_properties"],
+    str(sorted(di.sources_by_package(_pair_work))),
+)
+
+_pair_dev = _pair / "dev"
+(_pair_dev / "rig_utils_alembic_properties" / "0.3.1").mkdir(parents=True)
+(_pair_dev / "rig_utils_alembic_properties" / "0.3.1" / "package.py").write_text(
+    'name = "rig_utils_alembic_properties"\nversion = "0.3.1"\n'
+)
+_built = lp.LocalPackage(
+    name="rig_utils_alembic_properties",
+    version="0.3.1",
+    path=_pair_dev / "rig_utils_alembic_properties" / "0.3.1",
+)
+check(
+    "an update is not blocked just because the folder is spelled differently",
+    di.update_blocker([_built], True, _pair_work) == "",
+    di.update_blocker([_built], True, _pair_work),
+)
+time.sleep(0.02)
+(_pair_work / "rig_utils-alembic-properties" / "edited.py").write_text("# newer\n")
+_pair_stale = di.stale_installs([_built], _pair_work)
+check(
+    "and editing the checkout makes the build stale, as it would for any other",
+    [x.package.name for x in _pair_stale] == ["rig_utils_alembic_properties"],
+    str([x.package.name for x in _pair_stale]),
+)
+check(
+    "pointing at the checkout, not at a folder of the same name",
+    _pair_stale and _pair_stale[0].source.name == "rig_utils-alembic-properties",
+    str(_pair_stale[0].source) if _pair_stale else "nothing stale",
+)
+
 print()
 if failures:
     print("%d FAILED: %s" % (len(failures), ", ".join(failures)))

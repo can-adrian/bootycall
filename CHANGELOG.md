@@ -10,6 +10,38 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.13.0
+
+Minor: checkouts and builds are paired differently, which changes what resolves.
+
+- **A checkout is matched to its build by the name the package declares, not
+  the folder it sits in.** `rig_utils-alembic-properties` whose `package.py`
+  says `rig_utils_alembic_properties` was listed as *(not installed)* beside
+  the build it had just produced — two rows for one package — and *Update Dev
+  Installs* could never see it as stale, because the pairing it does was made
+  on a name that never matched.
+
+- **Where the folder and the package differ, the row says so**:
+  `rig_utils_alembic_properties-0.3.1  (rig_utils-alembic-properties)`. Only
+  when they differ; repeating a name the row already carries would be noise on
+  every other row.
+
+- **Re-install from &lt;folder&gt;** on an installed dev package's right-click
+  menu, rebuilding it from the checkout it came from. Offered only on a single
+  package that still has a working copy.
+
+- **Copy launch command copies the rez command and nothing else** —
+  `rez-env base-6 nuke-16.0 … -- nuke`. It used to copy the `cd`, the terminal
+  wrapper and the reporting preamble, which is a screenful of shell nobody
+  pastes anywhere. It also stopped writing a launch script to disk every time
+  you pressed Ctrl+C: building a preview is not a reason to write a file.
+
+- README: one section on **how the packages path is actually overridden**,
+  gathering what was spread across three places — where the starting path comes
+  from, what is spliced in and out, why per-package disable is a directory of
+  symlinks, and the thing that costs people days, which is that path order does
+  not decide which version wins.
+
 ## 0.12.2
 
 Patch: the show field does what it looks like it does.

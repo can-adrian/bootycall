@@ -53,10 +53,24 @@ class WorkingPackage:
     definition: str = ""
     #: Why it cannot be installed, when it cannot. Empty means it can.
     problem: str = ""
+    #: What the definition calls itself, which need not be the folder name.
+    #: Falls back to the folder name when the definition cannot be read.
+    #:
+    #: Everything that pairs a working copy with an installed build matches on
+    #: this. Matching on the folder name looked right and quietly failed for
+    #: every checkout whose folder is not spelled like its package -- the copy
+    #: showed as "not installed" next to the build it had produced, and the
+    #: staleness check never looked at it again.
+    package_name: str = ""
 
     @property
     def is_package(self) -> bool:
         return bool(self.definition) and not self.problem
+
+    @property
+    def renamed(self) -> bool:
+        """Is the folder spelled differently from the package inside it?"""
+        return bool(self.package_name) and self.package_name != self.name
 
 
 def _definition_in(directory: Path) -> str:
@@ -93,12 +107,26 @@ def list_working_packages(root: Path | str | None = None) -> list[WorkingPackage
         path = Path(entry.path)
         definition = _definition_in(path)
         problem = "" if definition else "no package definition in it"
+        declared = definition_fields(path).get("name", "") if definition else ""
         found.append(
             WorkingPackage(
-                name=entry.name, path=path, definition=definition, problem=problem
+                name=entry.name,
+                path=path,
+                definition=definition,
+                problem=problem,
+                package_name=declared or entry.name,
             )
         )
     return found
+
+
+def sources_by_package(root: Path | str | None = None) -> dict[str, WorkingPackage]:
+    """Working copies keyed by the package name they declare."""
+    return {
+        p.package_name: p
+        for p in list_working_packages(root)
+        if p.is_package and p.package_name
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -334,8 +362,12 @@ def stale_installs(
 ) -> list[StaleInstall]:
     """Which installed dev packages are behind their working copies.
 
-    Matched by directory name, which is what the working location and the dev
-    root have in common. A package with no working copy is not stale -- it was
+    Matched by the name the definition declares, not the folder it sits in: a
+    checkout called ``rig_utils-alembic-properties`` builds a package called
+    ``rig_utils_alembic_properties``, and pairing them by folder name never
+    matched, so that package could never be reported stale.
+
+    A package with no working copy is not stale -- it was
     installed from somewhere else, and calling that out of date would be an
     invention.
 
@@ -347,7 +379,7 @@ def stale_installs(
     is noise.
     """
     root = Path(working_root) if working_root is not None else dev_working_root()
-    sources = {p.name: p for p in list_working_packages(root) if p.is_package}
+    sources = sources_by_package(working_root)
     if not sources:
         return []
 
@@ -419,16 +451,27 @@ def update_blocker(
             % root
         )
 
-    shared = {p.name for p in enabled} & {p.name for p in working}
+    shared = {p.name for p in enabled} & {p.package_name for p in working}
     if not shared:
         return (
             "None of your installed dev packages have a working copy in:\n"
             "  %s\n\nInstalled: %s\nWorking copies: %s\n\nUpdates are "
-            "matched by directory name, so nothing here can be rebuilt."
+            "matched by the name the package declares, not the folder it sits "
+            "in, so a checkout can be called anything."
             % (
                 root,
                 ", ".join(sorted({p.name for p in enabled})) or "none",
-                ", ".join(sorted(p.name for p in working)) or "none",
+                # Both names when they differ: the folder is what you will
+                # look for on disk, the package is what the match is made on.
+                ", ".join(
+                    sorted(
+                        "%s (in %s)" % (p.package_name, p.name)
+                        if p.renamed
+                        else p.name
+                        for p in working
+                    )
+                )
+                or "none",
             )
         )
     return ""
