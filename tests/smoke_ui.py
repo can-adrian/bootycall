@@ -3434,6 +3434,57 @@ check(
     str(_labels),
 )
 
+print("\nthe checkboxes are lighter than what they sit on")
+from bootycall.ui.style import check_asset, indicator_rules  # noqa: E402
+
+_style = app.styleSheet()
+check(
+    "the indicator is styled at all - unstyled it is the platform's dark grey "
+    "on a #0e1c2b list, which is something you have to hunt for",
+    "::indicator" in _style and "#24384e" in _style,
+    "indicator rules missing from the applied stylesheet",
+)
+_checked_block = indicator_rules("x.svg").split("::indicator:checked")[-1]
+check(
+    "ticked and unticked are different fills, not just different glyphs",
+    "#e0a23c" in _checked_block.split("}")[0]
+    and "#24384e" not in _checked_block.split("}")[0],
+    _checked_block.split("}")[0],
+)
+
+# Styling an indicator takes Qt off its native drawing path, so the platform's
+# checkmark stops appearing and an image has to supply one. Without it the two
+# states differ by fill alone, which is a worse way to say "on" than a tick.
+_asset = check_asset(Path(tempfile.mkdtemp(prefix="bootycall-asset-")))
+check("the tick is written to disk", _asset and Path(_asset).is_file(), _asset)
+check(
+    "and the rules point at it",
+    'image: url("%s")' % _asset in indicator_rules(_asset),
+    indicator_rules(_asset),
+)
+check(
+    "rewriting is idempotent",
+    check_asset(Path(_asset).parent) == _asset,
+)
+
+# A read-only config directory is not a reason to fail to start: the boxes
+# still read, they just say "on" with fill alone.
+if os.geteuid() != 0:
+    # Skipped as root, which can write into a directory it has no permission
+    # on -- the check would pass for the wrong reason.
+    _locked = Path(tempfile.mkdtemp(prefix="bootycall-ro-")) / "nested"
+    _locked.parent.chmod(0o500)
+    try:
+        check("an unwritable directory returns nothing rather than raising",
+              check_asset(_locked) == "", check_asset(_locked))
+    finally:
+        _locked.parent.chmod(0o700)
+check(
+    "and the rules are still valid without it",
+    "image:" not in indicator_rules("") and "#24384e" in indicator_rules(""),
+    indicator_rules(""),
+)
+
 print("\ntooltips are readable, not light-on-light")
 _style = app.styleSheet()
 check("QToolTip is styled at all", "QToolTip" in _style)

@@ -74,7 +74,7 @@ from .dcc_tile import DccTile
 from .favorites_window import FavoritesWindow
 from .flow_layout import FlowLayout
 from .settings_dialog import SettingsDialog
-from .style import STYLESHEET
+from .style import STYLESHEET, check_asset, indicator_rules
 
 
 #: Width of a software tile, and therefore the width compact mode aims for --
@@ -3242,4 +3242,6 @@ class MainWindow(QMainWindow):
 
 
 def apply_style(app: QApplication) -> None:
-    app.setStyleSheet(STYLESHEET)
+    # The checkbox rules need an asset on disk before they can name it, so they
+    # are built here rather than sitting in the stylesheet constant.
+    app.setStyleSheet(STYLESHEET + indicator_rules(check_asset()))

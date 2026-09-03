@@ -10,6 +10,26 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.15.3
+
+Patch: you can see the checkboxes now.
+
+- **The box is lighter than what it sits on.** It was the platform's own dark
+  grey on a `#0e1c2b` list and a `#0b1724` section header — something you had
+  to hunt for rather than read. It is now a slate box with a light border,
+  amber when ticked.
+
+- **With a real tick in it.** Styling an indicator at all takes Qt off its
+  native drawing path, so the platform's checkmark stops appearing and an
+  `image:` has to supply one — without which the two states differ by fill
+  colour alone, which is a worse way to say "on" than a tick is. A 13px SVG is
+  written beside `configs.json` at startup and the stylesheet points at it.
+
+  Beside the config file rather than in a temporary directory: launch scripts
+  are pruned after a day, and a checkmark that vanishes overnight is a bug
+  nobody would think to look for. A directory that cannot be written is not an
+  error — the rules are built without the image, and the boxes still read.
+
 ## 0.15.2
 
 Patch: the terminal names the packages this window added.

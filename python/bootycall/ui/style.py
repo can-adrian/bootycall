@@ -1,5 +1,9 @@
 """Dark stylesheet, sized for a facility workstation."""
 
+from __future__ import annotations
+
+from pathlib import Path
+
 STYLESHEET = """
 /* Without an explicit rule a tooltip takes its *text* colour from the QWidget
    rule below and its background from the platform's tooltip palette, which is
@@ -347,3 +351,78 @@ QProgressBar#microProgress {
 }
 QProgressBar#microProgress::chunk { background: #e0a23c; }
 """
+
+#: The tick drawn inside a ticked box.
+#:
+#: Styling a checkbox indicator at all takes Qt off its native drawing path, so
+#: the platform's checkmark stops appearing and an ``image:`` has to supply
+#: one. Without it the two states differ by fill colour alone, which is a
+#: worse way to say "on" than a tick is.
+#:
+#: Dark on the amber fill, since that is what it is drawn on.
+CHECK_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" '
+    'viewBox="0 0 13 13">'
+    '<path d="M3 6.8 L5.4 9.2 L10 3.9" fill="none" stroke="#12202f" '
+    'stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>'
+    "</svg>"
+)
+
+
+def check_asset(directory=None) -> str:
+    """Write the tick where the stylesheet can point at it, and return the path.
+
+    Beside the config file rather than in a temporary directory: launch scripts
+    are pruned after a day, and a checkmark that vanishes overnight is a bug
+    nobody would think to look for.
+
+    Returns "" when it cannot be written, which is not an error -- the boxes
+    still read, they just say "on" with fill alone.
+    """
+    from .. import configs
+
+    base = Path(directory) if directory is not None else configs.default_config_path().parent
+    target = base / "check.svg"
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+        if not target.is_file() or target.read_text(encoding="utf-8") != CHECK_SVG:
+            target.write_text(CHECK_SVG, encoding="utf-8")
+    except OSError:
+        return ""
+    return target.as_posix()
+
+
+def indicator_rules(asset: str = "") -> str:
+    """Checkbox rules, which need a written asset before they can be built.
+
+    Kept out of :data:`STYLESHEET` for that reason, and appended by
+    :func:`~bootycall.ui.main_window.apply_style`.
+
+    The box is lighter than what it sits on -- the lists are ``#0e1c2b`` and
+    the section headers ``#0b1724``, and a box drawn in the platform's own dark
+    grey on either of those is something you have to hunt for.
+    """
+    tick = 'image: url("%s");' % asset if asset else ""
+    return """
+QListView::indicator,
+QCheckBox#collapsibleCheck::indicator {
+    width: 13px;
+    height: 13px;
+    border-radius: 3px;
+    border: 1px solid #4a6484;
+    background: #24384e;
+}
+QListView::indicator:hover,
+QCheckBox#collapsibleCheck::indicator:hover { border-color: #6a86a8; }
+QListView::indicator:checked,
+QCheckBox#collapsibleCheck::indicator:checked {
+    background: #e0a23c;
+    border-color: #f0be6a;
+    %s
+}
+QListView::indicator:disabled,
+QCheckBox#collapsibleCheck::indicator:disabled {
+    background: #16273a;
+    border-color: #2b3f55;
+}
+""" % tick

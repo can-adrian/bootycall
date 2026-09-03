@@ -1200,7 +1200,7 @@ python/bootycall/
     flow_layout.py      wrapping layout for the software row
     main_window.py
     package_delegate.py the package rows: asides in italic
-    style.py
+    style.py            the dark stylesheet, and the checkbox tick it writes
   app.py             application entry point
 tests/
   test_packaging.py      version agreement and rez payload checks
