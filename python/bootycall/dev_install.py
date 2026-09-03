@@ -31,7 +31,9 @@ from .local_packages import (
     DEFINITION_FILES,
     LocalPackage,
     definition_fields,
+    definition_variants,
     dev_working_root,
+    variant_subpath,
     version_key,
 )
 
@@ -232,6 +234,58 @@ def installed_paths(source: Path | str, dest_root: Path | str) -> list[Path]:
     return candidates
 
 
+def variant_blocker(source: Path | str) -> str:
+    """Why this package cannot be used as a link to its source, or "".
+
+    rez does not put a variant's payload in the version root. It puts it in a
+    subdirectory of it, one path segment per variant requirement --
+    ``1.8.666/python-3.9/`` -- and only the build creates that. A link to a
+    working copy points at a tree that has never had one, so rez reads the
+    definition, looks for the variant it names, finds nothing there, and uses
+    the studio build instead. No error, no missing package: it simply is not
+    the one you get.
+
+    So the check is not "does rez dislike symlinks" -- it is "do the
+    directories rez will look in exist". If someone has built in place and they
+    do, linking is fine and this says nothing.
+
+    A site using ``hashed_variants`` gets an opaque directory name instead of
+    the one guessed here, which does not change the answer: either way it is
+    something only a build produces, and none of them are in the checkout.
+    """
+    variants = definition_variants(source)
+    if not variants:
+        # Also covers "cannot tell": a variants list built by code rather than
+        # written out reads as none here, and refusing on a guess would block
+        # a package that links perfectly well.
+        return ""
+
+    root = Path(source)
+    wanted = [variant_subpath(v) for v in variants]
+    present = [w for w in wanted if w and (root / w).is_dir()]
+    if len(present) == len(wanted):
+        return ""
+
+    return (
+        "%s declares %d variant%s, so it cannot be linked.\n\n"
+        "rez keeps each variant's payload in a subdirectory of the version "
+        "root, and only the build creates it:\n%s\n\nNone of those are in "
+        "the checkout, so rez would read the definition through the link, "
+        "look for the variant, find nothing, and quietly use the studio build "
+        "instead.\n\nUse Install for this one."
+        % (
+            root.name,
+            len(variants),
+            "" if len(variants) == 1 else "s",
+            "\n".join(
+                "  %s/%s%s"
+                % (root.name, w, "   (present)" if w in present else "")
+                for w in wanted
+            ),
+        )
+    )
+
+
 def symlink(source: Path | str, dest_root: Path | str) -> tuple[bool, str]:
     """Link ``source`` into ``dest_root`` instead of building it.
 
@@ -244,10 +298,18 @@ def symlink(source: Path | str, dest_root: Path | str) -> tuple[bool, str]:
     it makes the staleness check meaningless, because the installed copy *is*
     the working copy and can never be behind it. It also means a broken save is
     live in every DCC you launch, immediately.
+
+    A package that declares ``variants`` is refused outright -- see
+    :func:`variant_blocker`. Linking one produces a link rez reads and then
+    cannot use, which is worse than not linking it.
     """
     source_path = Path(source).resolve()
     if not _definition_in(source_path):
         return False, "%s has no package definition in it" % source_path
+
+    blocker = variant_blocker(source_path)
+    if blocker:
+        return False, blocker
 
     # The link has to be named for what the package *declares*, not for the
     # folder it happens to live in. rez reads the definition but finds the

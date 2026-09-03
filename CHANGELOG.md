@@ -10,6 +10,34 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.13.1
+
+Patch: why linking a package quietly does nothing, and a flag that was being erased.
+
+- **A package that declares `variants` cannot be linked, and is now refused
+  with the reason.** rez keeps each variant's payload in a subdirectory of the
+  version root — `1.8.666/python-3.9/` — and only the build creates it. A link
+  points at a checkout that has never had one: rez reads the definition through
+  it, looks for the variant, finds nothing, and uses the studio build. No error
+  and no missing package, so it looks exactly like the package losing on
+  version.
+
+  The check is "do the directories rez will look in exist", not "does rez
+  dislike links": a checkout built in place links normally, and a `variants`
+  list built by code reads as *cannot tell* rather than as a reason to refuse.
+  The refusal names every directory rez wants and offers Install instead.
+
+- **Links already made this way are flagged** in the dev list and in
+  Diagnostics, rather than sitting there looking like a working install.
+
+- **Fixed the flag being erased.** `_refresh_override_marks` rebuilt every
+  row's text from the part before the separator, including rows the scan had
+  just flagged — so *"rez will skip this"*, the one message that says a package
+  reaches no resolve at all, was painted and then wiped by the pass that runs
+  immediately after. It has been invisible since it was written. The reason is
+  kept on the row now, and a flagged package is left out of the override
+  marking entirely: something rez skips cannot be overriding anything.
+
 ## 0.13.0
 
 Minor: checkouts and builds are paired differently, which changes what resolves.

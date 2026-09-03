@@ -409,6 +409,67 @@ def definition_fields(path: Path | str) -> dict[str, str]:
     return found
 
 
+def definition_variants(path: Path | str) -> tuple[tuple[str, ...], ...]:
+    """The ``variants`` a package definition declares, read statically.
+
+    ``variants = [["python-3.9"], ["python-3.11"]]`` becomes
+    ``(("python-3.9",), ("python-3.11",))``. Empty when the package declares
+    none, when the list is built by code rather than written out, or when the
+    file cannot be read -- all three mean "cannot tell", and callers must treat
+    them as such rather than as "there are none".
+
+    Worth knowing before linking a package rather than building it: rez puts a
+    variant's payload in a subdirectory of the version root, one path segment
+    per requirement, and only the build creates it.
+    """
+    definition = Path(path)
+    if definition.is_dir():
+        found_name = _definition_in(definition)
+        if not found_name:
+            return ()
+        definition = definition / found_name
+    if definition.suffix in (".yaml", ".yml"):
+        return ()
+
+    try:
+        tree = ast.parse(definition.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, SyntaxError):
+        return ()
+
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(
+            isinstance(t, ast.Name) and t.id == "variants" for t in node.targets
+        ):
+            continue
+        try:
+            value = ast.literal_eval(node.value)
+        except (ValueError, SyntaxError):
+            return ()
+        if not isinstance(value, (list, tuple)):
+            return ()
+        found = []
+        for entry in value:
+            if isinstance(entry, (list, tuple)):
+                found.append(tuple(str(r) for r in entry))
+            else:
+                found.append((str(entry),))
+        return tuple(found)
+    return ()
+
+
+def variant_subpath(requires: Sequence[str]) -> str:
+    """Where rez puts one variant's payload, relative to the version root.
+
+    One path segment per requirement, which is rez's default scheme. A site
+    using ``hashed_variants`` gets an opaque directory instead -- which does not
+    change the conclusion anywhere this is used, because either way the
+    directory is something only the build produces.
+    """
+    return os.path.join(*[str(r) for r in requires]) if requires else ""
+
+
 def definition_mismatch(package: LocalPackage) -> str:
     """Why rez would skip this package, or "" if it would not.
 

@@ -18,7 +18,7 @@ import os
 from pathlib import Path
 from typing import Sequence
 
-from . import __version__, config, launcher
+from . import __version__, config, dev_install, launcher
 from .discovery import find_show_package
 from .local_packages import (
     LocalPackage,
@@ -320,6 +320,14 @@ def resolve_report(window) -> str:
         link = link_in(root, window.highlight_roots())
         if link:
             lines.append("    a link, at:        %s -> %s" % link)
+            blocked = dev_install.variant_blocker(link[1])
+            if blocked:
+                lines.append(
+                    "    *** that link is to a checkout of a package with "
+                    "variants, whose\n        payload directories only a "
+                    "build creates. rez reads the\n        definition through "
+                    "it and then uses something else."
+                )
         if version == newest:
             lines.append("    >>> yours is the one in the environment")
         else:

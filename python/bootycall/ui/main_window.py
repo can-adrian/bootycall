@@ -94,6 +94,12 @@ _SOURCE_PATH_ROLE = Qt.UserRole + 2
 #: On an *installed* dev row: the working copy it was built from, when one can
 #: be found. What Re-install rebuilds.
 _BUILT_FROM_ROLE = Qt.UserRole + 3
+#: Why rez will skip this package, when it will. Kept on the row rather than
+#: only in its text: the override pass rewrites every row's text from the part
+#: before the separator, which quietly threw this away on the next refresh --
+#: so the one flag that says "this package reaches no resolve at all" was
+#: painted once and then erased.
+_PROBLEM_ROLE = Qt.UserRole + 4
 
 #: Row colours, matching the counts in the section header exactly. A header
 #: that says "2 outranked" in red over two grey rows makes the reader work out
@@ -1605,9 +1611,18 @@ class MainWindow(QMainWindow):
                 # else this list says about it: an override that rez never
                 # sees is not an override, it is a puzzle.
                 problem = definition_mismatch(package)
+                if not problem and package.is_symlink:
+                    # A link to a checkout of a package that declares variants
+                    # is read by rez and then not used, because the variant's
+                    # payload lives in a subdirectory only the build creates.
+                    # Silent, and indistinguishable from the package simply
+                    # losing -- so say it here, where the link is listed.
+                    if dev_install.variant_blocker(package.path):
+                        problem = "variants are not built here - rez will skip it"
                 if problem:
                     item.setText("%s      %s" % (display, problem))
                     item.setForeground(QColor("#e06c75"))
+                    item.setData(_PROBLEM_ROLE, problem)
 
                 if tickable:
                     # Setting a check state is what puts a box on the row --
@@ -1831,6 +1846,19 @@ class MainWindow(QMainWindow):
         QApplication.processEvents()
         ok, detail = action(source, dev_root())
         if not ok:
+            if link and dev_install.variant_blocker(source):
+                # The failure names Install as the fix, so offer it here rather
+                # than making them close this and find the menu again.
+                box = QMessageBox(self)
+                box.setIcon(QMessageBox.Warning)
+                box.setWindowTitle("Cannot link this one")
+                box.setText(detail)
+                build = box.addButton("Install instead", QMessageBox.AcceptRole)
+                box.addButton("Cancel", QMessageBox.RejectRole)
+                box.exec()
+                if box.clickedButton() is build:
+                    self._build_from(source, link=False)
+                return
             QMessageBox.critical(
                 self,
                 "Could not %s" % (verb.lower() or ("link" if link else "install")),
@@ -2000,6 +2028,11 @@ class MainWindow(QMainWindow):
                 item = listing.item(row)
                 name = item.data(_PACKAGE_NAME_ROLE)
                 if not name:
+                    continue
+                if item.data(_PROBLEM_ROLE):
+                    # A package rez will skip cannot override anything, and
+                    # saying it does is how you spend an afternoon on a package
+                    # that was never in the running. Its own flag stands.
                     continue
                 shadow = overrides.get(name)
                 base = item.text().split("      ")[0]

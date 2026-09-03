@@ -460,6 +460,73 @@ check(
     str(_pair_stale[0].source) if _pair_stale else "nothing stale",
 )
 
+print("\nvariants: a link rez reads and then cannot use")
+# rez keeps a variant's payload in a subdirectory of the version root, one
+# path segment per requirement, and only the build creates it. A link to a
+# checkout points at a tree that has never had one: rez reads the definition,
+# looks for the variant, finds nothing there, and uses the studio build. No
+# error and no missing package -- it simply is not the one you get.
+_var = Path(tempfile.mkdtemp(prefix="bootycall-variants-"))
+_var_src = _var / "rig_utils"
+_var_src.mkdir()
+(_var_src / "package.py").write_text(
+    'name = "rig_utils"\n'
+    'version = "1.8.666"\n'
+    'variants = [["python-3.9"], ["python-3.11", "maya-2024"]]\n'
+)
+_var_dev = _var / "dev"
+_var_dev.mkdir()
+
+check(
+    "the variants are read out of the definition",
+    lp.definition_variants(_var_src)
+    == (("python-3.9",), ("python-3.11", "maya-2024")),
+    str(lp.definition_variants(_var_src)),
+)
+check(
+    "and turned into the subdirectories rez would look in",
+    [lp.variant_subpath(v) for v in lp.definition_variants(_var_src)]
+    == ["python-3.9", "python-3.11/maya-2024"],
+)
+
+_why = di.variant_blocker(_var_src)
+check("linking is refused", _why != "", "nothing said")
+check("naming every directory rez wants", "python-3.11/maya-2024" in _why, _why)
+check("and what to do instead", "Use Install" in _why, _why)
+_ok, _detail = di.symlink(_var_src, _var_dev)
+check("symlink() refuses too, not just the check", not _ok, _detail[:120])
+check("and no link was left behind", not (_var_dev / "rig_utils").exists())
+
+# The test is "do the directories exist", not "does rez dislike links". Built
+# in place, linking is fine and nothing is said.
+(_var_src / "python-3.9").mkdir()
+(_var_src / "python-3.11" / "maya-2024").mkdir(parents=True)
+check(
+    "a checkout built in place links normally",
+    di.variant_blocker(_var_src) == "" and di.symlink(_var_src, _var_dev)[0],
+    di.variant_blocker(_var_src),
+)
+
+# A variants list built by code reads as "cannot tell", and refusing on a
+# guess would block a package that links perfectly well.
+_computed = _var / "computed"
+_computed.mkdir()
+(_computed / "package.py").write_text(
+    'name = "computed"\n'
+    'version = "1.0.0"\n'
+    "variants = [[p] for p in (\"python-3.9\",)]\n"
+)
+check(
+    "a variants list this cannot read is not treated as a reason to refuse",
+    di.variant_blocker(_computed) == "",
+    di.variant_blocker(_computed),
+)
+check(
+    "and a package with no variants at all is never blocked",
+    di.variant_blocker(_pair_work / "plain_tool") == "",
+    di.variant_blocker(_pair_work / "plain_tool"),
+)
+
 print()
 if failures:
     print("%d FAILED: %s" % (len(failures), ", ".join(failures)))

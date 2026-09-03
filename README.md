@@ -411,6 +411,22 @@ Two ways to make one real, and they are genuinely different:
   nothing gets built, and the staleness check below can never fire, because the
   installed copy *is* the working copy. It asks before doing it.
 
+**A package that declares `variants` cannot be linked**, and BootyCall refuses
+rather than making a link rez reads and then ignores. rez keeps each variant's
+payload in a subdirectory of the version root — `1.8.666/python-3.9/` — and
+only the build creates it. A link points at a checkout that has never had one:
+rez reads the definition through it, looks for the variant, finds nothing
+there, and uses the studio build. No error, no missing package; it simply is
+not the one you get, which is indistinguishable from the package losing on
+version.
+
+The check is not *"does rez dislike links"* — it is *"do the directories rez
+will look in exist"*. Build in place and they do, and linking is allowed. A
+`variants` list built by code rather than written out reads as "cannot tell",
+and refusing on that would block a package that links perfectly well. A link
+already made this way is flagged in the dev list (*variants are not built here
+— rez will skip it*) and in Diagnostics.
+
 `BOOTYCALL_DEV_INSTALL_COMMAND` replaces the build command if your site installs
 packages its own way; `{dest}` is the dev root, and it runs with the working copy
 as its working directory.

@@ -3172,6 +3172,53 @@ if _have_links:
         str(sorted(x.name for x in _sym_src.iterdir())),
     )
 
+    # A link already made to a checkout with variants is read by rez and then
+    # not used. Silent, and indistinguishable from the package simply losing,
+    # so the row that lists the link has to say it.
+    _vsrc = Path(tempfile.mkdtemp(prefix="bootycall-uivar-")) / "vary"
+    _vsrc.mkdir(parents=True)
+    (_vsrc / "package.py").write_text(
+        'name = "vary"\nversion = "2.0.0"\nvariants = [["python-3.9"]]\n'
+    )
+    (_sym_dev / "vary").mkdir(parents=True)
+    os.symlink(_vsrc, _sym_dev / "vary" / "2.0.0")
+    cfg_mod.set_path_overrides({"dev_root": str(_sym_dev)})
+    window.refresh_package_lists()
+    QApplication.processEvents()
+    _vrow = [
+        window.dev_list.item(i).text()
+        for i in range(window.dev_list.count())
+        if window.dev_list.item(i).data(_NAME_ROLE) == "vary"
+    ]
+    check(
+        "a link to a checkout with unbuilt variants is flagged, not left silent",
+        _vrow and "variants are not built here" in _vrow[0],
+        str(_vrow),
+    )
+
+    # The override pass rewrites every row's text from the part before the
+    # separator. It used to do that to flagged rows too, so the one flag that
+    # says "this package reaches no resolve at all" was painted by the scan and
+    # erased by the pass that ran straight after it -- which is why nothing in
+    # the window ever showed a definition mismatch.
+    window._refresh_override_marks()
+    QApplication.processEvents()
+    _vrow = [
+        window.dev_list.item(i)
+        for i in range(window.dev_list.count())
+        if window.dev_list.item(i).data(_NAME_ROLE) == "vary"
+    ]
+    check(
+        "and the flag survives the override pass that runs after it",
+        _vrow and "variants are not built here" in _vrow[0].text(),
+        str([r.text() for r in _vrow]),
+    )
+    check(
+        "still in red, because it is still not going to resolve",
+        _vrow and _vrow[0].foreground().color().name() == "#e06c75",
+        str(_vrow[0].foreground().color().name()) if _vrow else "",
+    )
+
     cfg_mod.set_path_overrides({})
     window.refresh_package_lists()
     QApplication.processEvents()
