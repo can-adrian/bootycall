@@ -385,6 +385,20 @@ def launch_banner(
             "            fi",
             '            _bc_walk=${_bc_walk%/*}',
             "        done",
+            # And then downwards, for a live install: the package directory is
+            # real and its *payload* is links to a working copy, so nothing
+            # above it is a link and the walk above finds nothing. Two levels,
+            # which is where the payload sits -- and the same rule the package
+            # lists use, so the window and the terminal cannot disagree about
+            # the same install.
+            '        if [ -z "$_bc_link" ]; then',
+            '            for _bc_kid in "$_bc_path"/* "$_bc_path"/*/*; do',
+            '                if [ -L "$_bc_kid" ]; then',
+            "                    _bc_link='  (live)'",
+            '                    break',
+            '                fi',
+            '            done',
+            '        fi',
             "        printf '%s\\n'"
             ' "    ${_bc_c}${_bc_name}  (${_bc_label})${_bc_link}${_bc0}"',
             "    done",

@@ -10,6 +10,22 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.15.1
+
+Patch: the terminal could not see a live install.
+
+- **The launch report says `(live)`.** Its symlink walk went upward only, from
+  the package root towards the root it was found under. A live install has no
+  link above it at all — the package directory is real and its *payload* is
+  links to the checkout — so the terminal said nothing about exactly the
+  installs Link now makes. It checks the two levels beneath the root as well,
+  the same rule the package lists use.
+
+- Diagnostics too, in both its sections. Three descriptions of one install that
+  disagree are worse than none, so the window, the terminal and the report use
+  the same two words: *(symlinked)* when the package is itself a link,
+  *(live)* when its payload is.
+
 ## 0.15.0
 
 Minor: a dev package can now be put into an environment that never asked for it.

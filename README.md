@@ -449,9 +449,16 @@ A build that *generates* its payload would have the generated result replaced
 by the source it was generated from. For pure-Python packages — the ones where
 reinstalling is pure overhead — it is exactly right.
 
-Such an install reads *(live)* in the dev list rather than *(symlinked)*: the
-package on disk is real, only its payload is links. It is never reported stale,
-for the same reason a link is not — its payload *is* the checkout.
+Such an install reads *(live)* rather than *(symlinked)* — the package on disk
+is real, only its payload is links — in the dev list, in the launch report and
+in Diagnostics, all three using the same two words for the same install. It is
+never reported stale, for the same reason a link is not: its payload *is* the
+checkout.
+
+The launch report finds it by looking **down** as well as up. A package that is
+itself a link is found by walking from the package root towards the root it was
+found under; a live install has no link above it at all, so the same two levels
+the package lists use are checked beneath it.
 
 A link made by hand to a variant package, or by a BootyCall older than this, is
 flagged in the dev list (*variants are not built here — rez will skip it*) and

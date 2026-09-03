@@ -639,6 +639,64 @@ check(
     link_in("/somewhere/else/entirely", _highlights) is None,
 )
 
+print("\na live install is a link too, from the other direction")
+# The walk above goes upward, from the package root towards the root it was
+# found under. A live install has no link above it at all: the package
+# directory is real and its *payload* is links to a working copy. Looking only
+# upward, the terminal said nothing about the very installs Link now makes.
+_live = Path(tempfile.mkdtemp(prefix="bootycall-live-"))
+(_live / "checkout" / "python").mkdir(parents=True)
+(_live / "dev" / "plainlink").mkdir(parents=True)
+(_live / "dev" / "live" / "1.0.0" / "python-3.9").mkdir(parents=True)
+(_live / "dev" / "real" / "3.0.0" / "python").mkdir(parents=True)
+os.symlink(_live / "checkout", _live / "dev" / "plainlink" / "1.0.0")
+os.symlink(
+    _live / "checkout" / "python",
+    _live / "dev" / "live" / "1.0.0" / "python-3.9" / "python",
+)
+
+_live_banner = launcher.launch_banner((("dev", str(_live / "dev")),))
+_live_env = {
+    "PATH": os.environ.get("PATH", ""),
+    "REZ_PLAINLINK_ROOT": str(_live / "dev/plainlink/1.0.0"),
+    "REZ_PLAINLINK_VERSION": "1.0.0",
+    "REZ_LIVE_ROOT": str(_live / "dev/live/1.0.0/python-3.9"),
+    "REZ_LIVE_VERSION": "1.0.0",
+    "REZ_REAL_ROOT": str(_live / "dev/real/3.0.0"),
+    "REZ_REAL_VERSION": "3.0.0",
+}
+for _shell in ("sh", "dash", "bash"):
+    if shutil.which(_shell) is None:
+        continue
+    _seen = subprocess.run(
+        [_shell, "-c", _live_banner], capture_output=True, text=True, env=_live_env
+    ).stdout
+    check(
+        "%s: a package that is itself a link says (symlinked)" % _shell,
+        "plainlink-1.0.0  (dev)  (symlinked)" in _seen,
+        _seen,
+    )
+    check(
+        "%s: one whose payload is links says (live)" % _shell,
+        "live-1.0.0  (dev)  (live)" in _seen,
+        _seen,
+    )
+    check(
+        "%s: and a real install says neither" % _shell,
+        "real-3.0.0  (dev)\n" in _seen,
+        _seen,
+    )
+
+# The window, the terminal and Diagnostics have to agree about one install.
+from bootycall import dev_install as _dev  # noqa: E402
+
+check(
+    "the same rule decides it in Python",
+    bool(_dev.live_links(_live / "dev/live/1.0.0/python-3.9"))
+    and not _dev.live_links(_live / "dev/real/3.0.0"),
+    str(_dev.live_links(_live / "dev/live/1.0.0/python-3.9")),
+)
+
 print("\nand it survives rez re-quoting the command")
 # rez does not run the argv it is handed. It writes the whole thing into a
 # rez-shell.sh of its own, inside double quotes, and runs that. Anything

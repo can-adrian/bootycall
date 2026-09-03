@@ -317,6 +317,12 @@ def resolve_report(window) -> str:
 
         lines.append("    rez resolved:      %s" % version)
         lines.append("    from:              %s" % (root or "<unknown>"))
+        live = dev_install.live_links(root) if root else []
+        if live:
+            lines.append(
+                "    live, payload at:  %s"
+                % ", ".join(str(os.path.realpath(x)) for x in live[:3])
+            )
         link = link_in(root, window.highlight_roots())
         if link:
             lines.append("    a link, at:        %s -> %s" % link)
@@ -344,7 +350,14 @@ def resolve_report(window) -> str:
     lines.append(_heading("everything rez resolved"))
     for key in sorted(probe.resolved):
         version, root = probe.resolved[key]
-        mark = "  (symlinked)" if link_in(root, window.highlight_roots()) else ""
+        if link_in(root, window.highlight_roots()):
+            mark = "  (symlinked)"
+        elif root and dev_install.live_links(root):
+            # Same two words the launch report and the package lists use. Three
+            # descriptions of one install that disagree are worse than none.
+            mark = "  (live)"
+        else:
+            mark = ""
         lines.append("  %-32s %-14s %s%s" % (key.lower(), version, root, mark))
     return "\n".join(lines)
 
