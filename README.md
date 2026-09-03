@@ -405,27 +405,57 @@ Two ways to make one real, and they are genuinely different:
   requires are the package's own business, and reimplementing any of it here
   would be a second, worse rez. A failed build shows you rez's own output rather
   than a paraphrase of it.
-* **Symlink** points the dev root at the working copy. Every edit is live in the
-  next resolve with no install step, which is what you want while you are
-  changing something every few minutes — and it means a broken save is live too,
+* **Link to working copy (live)** points the dev root at the working copy.
+  Every edit is live in the next resolve with no install step, which is what
+  you want while you are changing something every few minutes — and it means a broken save is live too,
   nothing gets built, and the staleness check below can never fire, because the
   installed copy *is* the working copy. It asks before doing it.
 
-**A package that declares `variants` cannot be linked**, and BootyCall refuses
-rather than making a link rez reads and then ignores. rez keeps each variant's
-payload in a subdirectory of the version root — `1.8.666/python-3.9/` — and
-only the build creates it. A link points at a checkout that has never had one:
-rez reads the definition through it, looks for the variant, finds nothing
+#### Variants, and linking one anyway
+
+A plain link cannot serve a package that declares `variants`. rez keeps each
+variant's payload in a subdirectory of the version root — `1.8.666/python-3.9/`
+— and only the build creates it. A link points at a checkout that has never had
+one: rez reads the definition through it, looks for the variant, finds nothing
 there, and uses the studio build. No error, no missing package; it simply is
 not the one you get, which is indistinguishable from the package losing on
 version.
 
-The check is not *"does rez dislike links"* — it is *"do the directories rez
-will look in exist"*. Build in place and they do, and linking is allowed. A
-`variants` list built by code rather than written out reads as "cannot tell",
-and refusing on that would block a package that links perfectly well. A link
-already made this way is flagged in the dev list (*variants are not built here
-— rez will skip it*) and in Diagnostics.
+Refusing to link it would be honest and useless — not reinstalling after every
+edit is the entire point, and it matters most for the packages most likely to
+have variants. So **Link builds once and then puts the checkout back where the
+build copied it**:
+
+```
+<dev>/rig_utils/1.8.666/package.py                    the built definition, untouched
+<dev>/rig_utils/1.8.666/python-3.9/python  ->  ~/dev/rig_utils/python
+<dev>/rig_utils/1.8.666/python-3.9/bin     ->  ~/dev/rig_utils/bin
+```
+
+rez's tree is exactly what its own build made, so every variant resolves; the
+payload is your working copy, so edits are live from then on. One build, then
+nothing.
+
+What gets linked is decided **by name**: every top-level entry in the checkout,
+found wherever the install put a copy of it. That sidesteps modelling rez's
+variant layout at all — including `hashed_variants`, whose directory names
+cannot be guessed — because rez has already made the directories and this only
+has to find them. The installed `package.py` is never linked: it is not the one
+in your checkout (the build strips `build_command` and resolves the variants),
+and replacing it would undo the install.
+
+The limit is honest and worth knowing: **this is for builds that copy files.**
+A build that *generates* its payload would have the generated result replaced
+by the source it was generated from. For pure-Python packages — the ones where
+reinstalling is pure overhead — it is exactly right.
+
+Such an install reads *(live)* in the dev list rather than *(symlinked)*: the
+package on disk is real, only its payload is links. It is never reported stale,
+for the same reason a link is not — its payload *is* the checkout.
+
+A link made by hand to a variant package, or by a BootyCall older than this, is
+flagged in the dev list (*variants are not built here — rez will skip it*) and
+in Diagnostics.
 
 `BOOTYCALL_DEV_INSTALL_COMMAND` replaces the build command if your site installs
 packages its own way; `{dest}` is the dev root, and it runs with the working copy

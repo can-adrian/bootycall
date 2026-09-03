@@ -1600,6 +1600,10 @@ class MainWindow(QMainWindow):
                     display += "  (%s)" % source.name
                 if package.is_symlink:
                     display += "  (symlinked)"
+                elif dev_install.is_live(package.path):
+                    # Built once, payload pointing back at the checkout. Reads
+                    # like an ordinary install on disk, behaves like a link.
+                    display += "  (live)"
 
                 item = QListWidgetItem(display)
                 item.setData(_PACKAGE_NAME_ROLE, package.name)
@@ -1617,6 +1621,9 @@ class MainWindow(QMainWindow):
                     # payload lives in a subdirectory only the build creates.
                     # Silent, and indistinguishable from the package simply
                     # losing -- so say it here, where the link is listed.
+                    #
+                    # Only reachable for links made before Link learned to do
+                    # a live install instead, or by hand.
                     if dev_install.variant_blocker(package.path):
                         problem = "variants are not built here - rez will skip it"
                 if problem:
@@ -1816,7 +1823,12 @@ class MainWindow(QMainWindow):
         """Right-click on something in the working location that is not built."""
         menu = QMenu(self)
         build_action = menu.addAction("Install")
-        link_action = menu.addAction("Link to working copy")
+        link_action = menu.addAction(
+            # Named for the outcome, not the mechanism: with variants it builds
+            # once and links the payload, without them it is a plain link, and
+            # from where you sit both mean "edit and relaunch".
+            "Link to working copy (live)"
+        )
         menu.addSeparator()
         browse_action = menu.addAction("Browse folder")
         copy_action = menu.addAction("Copy path")
@@ -1840,25 +1852,16 @@ class MainWindow(QMainWindow):
         """Build or link one working copy into the dev root, then reload."""
         action = dev_install.symlink if link else dev_install.install
         name = Path(source).name
+        # A package with variants cannot be served by a plain link, so Link
+        # builds it once first. Say so: it is the difference between a menu
+        # item that returns instantly and one that takes half a minute.
+        building = not link or bool(dev_install.variant_blocker(source))
         self.statusBar().showMessage(
-            "%s %s..." % ("Linking" if link else "Building", name)
+            "%s %s..." % ("Building" if building else "Linking", name)
         )
         QApplication.processEvents()
         ok, detail = action(source, dev_root())
         if not ok:
-            if link and dev_install.variant_blocker(source):
-                # The failure names Install as the fix, so offer it here rather
-                # than making them close this and find the menu again.
-                box = QMessageBox(self)
-                box.setIcon(QMessageBox.Warning)
-                box.setWindowTitle("Cannot link this one")
-                box.setText(detail)
-                build = box.addButton("Install instead", QMessageBox.AcceptRole)
-                box.addButton("Cancel", QMessageBox.RejectRole)
-                box.exec()
-                if box.clickedButton() is build:
-                    self._build_from(source, link=False)
-                return
             QMessageBox.critical(
                 self,
                 "Could not %s" % (verb.lower() or ("link" if link else "install")),
@@ -1871,7 +1874,12 @@ class MainWindow(QMainWindow):
         # cached resolve probe answered before it existed -- and a stale cache
         # here is exactly the kind of thing that costs an afternoon.
         self.reload_all()
-        done = verb + "ed" if verb else ("Linked" if link else "Installed")
+        if verb:
+            done = verb + "ed"
+        elif not link:
+            done = "Installed"
+        else:
+            done = "Linked (built once first)" if building else "Linked"
         self.statusBar().showMessage("%s %s" % (done, name), 8000)
 
     def browse_packages(self, packages: list[LocalPackage]) -> list[str]:

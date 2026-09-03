@@ -10,6 +10,39 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.14.0
+
+Minor: linking a package with variants works now, instead of being refused.
+
+- **Link builds once, then points the payload back at the checkout.** 0.13.1
+  refused to link a package with `variants`, which was honest and useless: not
+  reinstalling after every edit is the whole point, and it matters most for the
+  packages most likely to have variants.
+
+  Link now runs the build — so rez's tree is exactly what its own build made,
+  and every variant resolves — and then replaces the payload it copied with
+  links to the working copy. One build, then edits are live.
+
+  What gets linked is decided by name: every top-level entry in the checkout,
+  found wherever the install put a copy of it. No modelling of rez's variant
+  layout, which also means `hashed_variants` works, since rez has already made
+  the directories and this only has to find them. The installed `package.py` is
+  never touched.
+
+  For builds that copy files. A build that *generates* its payload would have
+  the generated result replaced by its source, which is said plainly in the
+  README rather than guarded against — a package with compiled code should be
+  installed, not linked.
+
+- **Such an install reads *(live)*** rather than *(symlinked)*: the package on
+  disk is real, only its payload is links. Never reported stale, for the same
+  reason a link is not.
+
+- Fixed `live_links` looking two directories deep where the links are written
+  three deep. A package whose only variant has two requirements
+  (`python-3.11/maya-2024`) read as an ordinary install, lost its label, and
+  went back on the update list. Caught by a test written for the count.
+
 ## 0.13.1
 
 Patch: why linking a package quietly does nothing, and a flag that was being erased.

@@ -490,20 +490,80 @@ check(
 )
 
 _why = di.variant_blocker(_var_src)
-check("linking is refused", _why != "", "nothing said")
+check("a plain link is ruled out", _why != "", "nothing said")
 check("naming every directory rez wants", "python-3.11/maya-2024" in _why, _why)
-check("and what to do instead", "Use Install" in _why, _why)
+
+print("\nso Link builds once and points the payload back at the checkout")
+# The whole value of linking is not reinstalling after every edit, and a
+# package with variants cannot have that from a plain link: rez needs the
+# variant directory only a build creates. Build once, then put the checkout
+# where the build copied it.
+(_var_src / "python" / "rig_utils").mkdir(parents=True)
+(_var_src / "python" / "rig_utils" / "__init__.py").write_text("VERSION = 1\n")
+(_var_src / "bin").mkdir()
+(_var_src / "bin" / "rigtool").write_text("#!/bin/sh\n")
+
+_saved_live = config.DEV_INSTALL_COMMAND
+# Stands in for rez-build: makes the variant tree, copies the payload, and
+# writes an installed definition that is NOT the source one.
+config.DEV_INSTALL_COMMAND = (
+    "bash", "-c",
+    'set -e\n'
+    'for v in python-3.9 python-3.11/maya-2024; do\n'
+    '  mkdir -p "$1/rig_utils/1.8.666/$v"\n'
+    '  cp -r python bin "$1/rig_utils/1.8.666/$v/"\n'
+    'done\n'
+    'printf \'name = "rig_utils"\\nversion = "1.8.666"\\n\''
+    ' > "$1/rig_utils/1.8.666/package.py"\n',
+    "x", "{dest}",
+)
 _ok, _detail = di.symlink(_var_src, _var_dev)
-check("symlink() refuses too, not just the check", not _ok, _detail[:120])
-check("and no link was left behind", not (_var_dev / "rig_utils").exists())
+config.DEV_INSTALL_COMMAND = _saved_live
+check("Link succeeds rather than refusing", _ok, _detail[:300])
+
+_landed = _var_dev / "rig_utils" / "1.8.666"
+check("rez's own tree is intact", (_landed / "package.py").is_file())
+check(
+    "and the definition is the built one, not the checkout's",
+    "variants" not in (_landed / "package.py").read_text(),
+    (_landed / "package.py").read_text(),
+)
+for _v in ("python-3.9", "python-3.11/maya-2024"):
+    check(
+        "%s: the payload points at the checkout" % _v,
+        (_landed / _v / "python").is_symlink()
+        and (_landed / _v / "python").resolve() == (_var_src / "python").resolve(),
+        str(_landed / _v / "python"),
+    )
+check("every payload entry, not just the first", len(di.live_links(_landed)) == 4,
+      str([str(x) for x in di.live_links(_landed)]))
+
+# The point of the exercise.
+(_var_src / "python" / "rig_utils" / "__init__.py").write_text("VERSION = 2\n")
+check(
+    "so an edit in the checkout is live with no reinstall",
+    all(
+        (_landed / _v / "python" / "rig_utils" / "__init__.py").read_text()
+        == "VERSION = 2\n"
+        for _v in ("python-3.9", "python-3.11/maya-2024")
+    ),
+)
+check("and it reads as live", di.is_live(_landed))
+
+_live_pkg = lp.LocalPackage(name="rig_utils", version="1.8.666", path=_landed)
+check(
+    "a live install is never stale - its payload is the checkout",
+    di.stale_installs([_live_pkg], _var) == [],
+    str(di.stale_installs([_live_pkg], _var)),
+)
 
 # The test is "do the directories exist", not "does rez dislike links". Built
-# in place, linking is fine and nothing is said.
+# in place, a plain link is fine and no build is needed.
 (_var_src / "python-3.9").mkdir()
 (_var_src / "python-3.11" / "maya-2024").mkdir(parents=True)
 check(
-    "a checkout built in place links normally",
-    di.variant_blocker(_var_src) == "" and di.symlink(_var_src, _var_dev)[0],
+    "a checkout built in place needs no build first",
+    di.variant_blocker(_var_src) == "",
     di.variant_blocker(_var_src),
 )
 

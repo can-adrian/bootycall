@@ -234,6 +234,169 @@ def installed_paths(source: Path | str, dest_root: Path | str) -> list[Path]:
     return candidates
 
 
+#: Never linked into a live install: the definition rez installed is not the
+#: one in your checkout (it has the build stripped out and the variants
+#: resolved), and replacing it would undo the install.
+LIVE_LINK_SKIP = ("package.py", "package.yaml", "package.yml", "package.txt")
+
+#: How far under the version root to look for payload copies. Two is enough
+#: for ``<version>/<variant>/python``; three covers a two-requirement variant
+#: like ``<version>/python-3.11/maya-2024/python``.
+LIVE_LINK_DEPTH = 3
+
+
+def payload_names(source: Path | str) -> list[str]:
+    """Top-level entries in a checkout that a build would copy into the install."""
+    root = Path(source)
+    skip = set(config.DEV_MTIME_IGNORE) | set(LIVE_LINK_SKIP)
+    try:
+        entries = sorted(os.scandir(root), key=lambda e: e.name)
+    except OSError:
+        return []
+    return [
+        e.name
+        for e in entries
+        if not e.name.startswith(".") and e.name not in skip
+    ]
+
+
+def live_links(installed: Path | str) -> list[Path]:
+    """Symlinks inside an installed package: the marks of a live install.
+
+    To the same depth :func:`link_payload` writes them, and never through one.
+    Two levels used to be enough for ``<version>/<variant>/python`` and missed
+    ``<version>/python-3.11/maya-2024/python`` entirely -- so a package whose
+    only variant has two requirements read as an ordinary install, lost its
+    label, and went back on the update list.
+    """
+    root = Path(installed)
+    found: list[Path] = []
+    try:
+        walker = os.walk(root)
+    except OSError:
+        return found
+
+    for dirpath, dirnames, filenames in walker:
+        here = Path(dirpath)
+        try:
+            depth = len(here.relative_to(root).parts)
+        except ValueError:
+            continue
+        if depth >= LIVE_LINK_DEPTH:
+            dirnames[:] = []
+
+        for name in list(dirnames) + list(filenames):
+            path = here / name
+            if path.is_symlink():
+                found.append(path)
+                if name in dirnames:
+                    # It is the checkout from here down, and none of what is
+                    # inside it is a mark of anything.
+                    dirnames.remove(name)
+    return found
+
+
+def is_live(installed: Path | str) -> bool:
+    """Is this install pointing at a working copy for any of its payload?"""
+    return bool(live_links(installed))
+
+
+def link_payload(source: Path | str, installed: Path | str) -> tuple[list[str], str]:
+    """Replace an install's payload with links to the checkout it came from.
+
+    The whole point of linking a package is not having to reinstall after every
+    edit, and for a package with variants a plain link cannot do it: rez needs
+    the variant directory that only a build creates. So build once, and then
+    put the checkout back where the build copied it.
+
+    What gets linked is decided by name: every top-level entry in the checkout,
+    found wherever the install put a copy of it. That sidesteps having to model
+    rez's variant layout at all -- including hashed variants, whose directory
+    names cannot be guessed -- because rez has already made the directories and
+    this only has to find them.
+
+    Returns ``(linked, error)``. The definition is never touched: the installed
+    ``package.py`` is not the one in your checkout, and replacing it would undo
+    the install.
+
+    This is for packages whose build copies files. A build that *generates* its
+    payload -- anything compiled -- would have the generated result replaced by
+    the source it was generated from, which is why the UI offers it as a
+    deliberate choice rather than doing it to every install.
+    """
+    source_path = Path(source)
+    root = Path(installed)
+    wanted = set(payload_names(source_path))
+    if not wanted:
+        return [], "nothing in %s to link" % source_path
+
+    linked: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        here = Path(dirpath)
+        depth = len(here.relative_to(root).parts)
+        if depth >= LIVE_LINK_DEPTH:
+            dirnames[:] = []
+        # Never descend into something already linked: it is the checkout.
+        dirnames[:] = [d for d in dirnames if not (here / d).is_symlink()]
+
+        for name in list(dirnames) + list(filenames):
+            if name not in wanted:
+                continue
+            target = here / name
+            if target.is_symlink():
+                continue
+            replacement = source_path / name
+            if not replacement.exists():
+                continue
+            try:
+                if target.is_dir():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink()
+                target.symlink_to(replacement, target_is_directory=replacement.is_dir())
+            except OSError as exc:
+                return linked, "could not link %s: %s" % (target, exc)
+            linked.append(str(target))
+            if name in dirnames:
+                dirnames.remove(name)
+
+    if not linked:
+        return [], (
+            "the build put nothing in %s under a name from the checkout "
+            "(%s), so there was nothing to link" % (root, ", ".join(sorted(wanted)))
+        )
+    return linked, ""
+
+
+def live_install(source: Path | str, dest_root: Path | str) -> tuple[bool, str]:
+    """Build once, then point the payload back at the checkout.
+
+    A plain link cannot serve a package with variants, and reinstalling after
+    every edit is the thing linking exists to avoid. This does the build that
+    makes rez's directories, and then puts the working copy where the build
+    copied it, so edits are live from then on.
+    """
+    ok, output = install(source, dest_root)
+    if not ok:
+        return False, output
+
+    landed = next(
+        (p for p in installed_paths(source, dest_root) if p.is_dir()), None
+    )
+    if landed is None:
+        return False, "the build worked but its output cannot be found"
+
+    linked, error = link_payload(source, landed)
+    if error:
+        return False, "%s\n\nThe build itself worked: %s" % (error, landed)
+    return True, "linked %d path%s under %s:\n  %s" % (
+        len(linked),
+        "" if len(linked) == 1 else "s",
+        landed,
+        "\n  ".join(linked),
+    )
+
+
 def variant_blocker(source: Path | str) -> str:
     """Why this package cannot be used as a link to its source, or "".
 
@@ -299,17 +462,17 @@ def symlink(source: Path | str, dest_root: Path | str) -> tuple[bool, str]:
     the working copy and can never be behind it. It also means a broken save is
     live in every DCC you launch, immediately.
 
-    A package that declares ``variants`` is refused outright -- see
-    :func:`variant_blocker`. Linking one produces a link rez reads and then
-    cannot use, which is worse than not linking it.
+    A package that declares ``variants`` cannot be served this way -- rez needs
+    a variant directory that only a build creates -- so it goes to
+    :func:`live_install` instead, which builds once and then points the payload
+    back at the checkout. Same result from where you sit: edit and relaunch.
     """
     source_path = Path(source).resolve()
     if not _definition_in(source_path):
         return False, "%s has no package definition in it" % source_path
 
-    blocker = variant_blocker(source_path)
-    if blocker:
-        return False, blocker
+    if variant_blocker(source_path):
+        return live_install(source_path, dest_root)
 
     # The link has to be named for what the package *declares*, not for the
     # folder it happens to live in. rez reads the definition but finds the
@@ -434,7 +597,10 @@ def stale_installs(
     invention.
 
     A symlinked install is never stale either: it *is* the working copy, so the
-    two times are the same by construction.
+    two times are the same by construction. Nor is a live install, whose
+    payload is links to that same working copy -- its own timestamps say
+    nothing, and reporting it as behind would put a package that is always up
+    to date permanently on the update list.
 
     Only the newest version of each name is checked. Older versions are history,
     and telling someone their 0.9.0 is behind the source that now builds 1.0.0
@@ -456,7 +622,7 @@ def stale_installs(
     stale: list[StaleInstall] = []
     for name, package in newest.items():
         source = sources.get(name)
-        if source is None or package.path.is_symlink():
+        if source is None or package.path.is_symlink() or is_live(package.path):
             continue
         source_time = newest_mtime(source.path)
         installed_time = newest_mtime(package.path)

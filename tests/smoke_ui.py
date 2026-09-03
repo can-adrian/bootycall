@@ -3196,6 +3196,32 @@ if _have_links:
         str(_vrow),
     )
 
+    # A live install is an ordinary directory on disk whose payload happens to
+    # be links. It has to read as live, or it looks like something you must
+    # reinstall after every edit -- which is the one thing it is not.
+    (_sym_dev / "livepkg" / "1.0.0" / "python-3.9").mkdir(parents=True)
+    (_sym_dev / "livepkg" / "1.0.0" / "package.py").write_text(
+        'name = "livepkg"\nversion = "1.0.0"\n'
+    )
+    os.symlink(_vsrc, _sym_dev / "livepkg" / "1.0.0" / "python-3.9" / "python")
+    window.refresh_package_lists()
+    QApplication.processEvents()
+    _lrow = [
+        window.dev_list.item(i).text()
+        for i in range(window.dev_list.count())
+        if window.dev_list.item(i).data(_NAME_ROLE) == "livepkg"
+    ]
+    check(
+        "an install whose payload points at a checkout says (live)",
+        _lrow and "(live)" in _lrow[0],
+        str(_lrow),
+    )
+    check(
+        "and not (symlinked), which it is not - the package itself is real",
+        _lrow and "(symlinked)" not in _lrow[0],
+        str(_lrow),
+    )
+
     # The override pass rewrites every row's text from the part before the
     # separator. It used to do that to flagged rows too, so the one flag that
     # says "this package reaches no resolve at all" was painted by the scan and
