@@ -60,8 +60,10 @@ from ..local_packages import (
     dev_working_root,
     list_local_packages,
     local_root,
+    request_name,
     resolves_to,
     shadowed_requests,
+    version_key,
 )
 from ..parser import Bootstrap
 from .chips import ShowChipBar
@@ -108,6 +110,11 @@ _ROW_IN_USE = "#e0a23c"      # the "N in use" note
 _ROW_LOST = "#e06c75"        # the "N outranked / N unusable" alert
 _ROW_QUIET = "#90a8c2"       # says nothing about the resolve
 _ROW_PLAIN = "#d7dae0"
+#: A dev build this window added to a resolve that never asked for it. Its own
+#: colour because it is its own thing: not the show's environment with one of
+#: your versions in it, but the show's environment plus something else.
+_ROW_APPENDED = "#4aa3df"
+
 #: Same hue as "in use", darker: a dev build the resolve names that is
 #: switched off. Unticking one does not make it stop being relevant to this
 #: show -- it just is not in play right now -- and painting it plain hid the
@@ -273,6 +280,7 @@ class MainWindow(QMainWindow):
         #: Installed dev packages switched off by name. Only the off ones
         #: are held, so a newly installed package is in play by default.
         self._disabled_dev: set[str] = set(self.store.disabled_dev_packages())
+        self._appended_dev: set[str] = set(self.store.appended_dev_packages())
         self._preferred_dcc = self.store.selected_dcc()
         self._restore_compact = self.store.compact()
         stored = self.store.visible_software()
@@ -1207,6 +1215,19 @@ class MainWindow(QMainWindow):
         )
         self.progress.raise_()
 
+    def _busy_progress(self) -> None:
+        """The bar with no end in sight, for one blocking operation.
+
+        A rez build takes seconds to a minute and blocks the loop, so the
+        window sits there looking hung. A range of (0, 0) is Qt's busy
+        indicator: it says "something is happening" without claiming to know
+        how much longer.
+        """
+        self.progress.setRange(0, 0)
+        self._place_progress()
+        self.progress.show()
+        QApplication.processEvents()
+
     def _start_progress(self, total: int) -> None:
         self.progress.setRange(0, max(1, total))
         self.progress.setValue(0)
@@ -1637,9 +1658,7 @@ class MainWindow(QMainWindow):
                     # setting it would say nothing. A row with no check state
                     # is how the local list stays plain.
                     item.setCheckState(
-                        Qt.Unchecked
-                        if package.name in self._disabled_dev
-                        else Qt.Checked
+                        Qt.Checked if self._dev_is_on(package.name) else Qt.Unchecked
                     )
                 listing.addItem(item)
 
@@ -1651,21 +1670,35 @@ class MainWindow(QMainWindow):
         if not name:
             return
 
-        was_disabled = name in self._disabled_dev
-        now_disabled = item.checkState() != Qt.Checked
-        if was_disabled == now_disabled:
-            return
+        on = item.checkState() == Qt.Checked
 
-        # By name, not by version: the checkbox says "use my build of this",
-        # and having 1.0.0 on while 0.9.0 is off would resolve to whichever
-        # rez picked anyway.
-        if now_disabled:
-            self._disabled_dev.add(name)
+        # One checkbox, one meaning: is this dev package in the environment.
+        # What that takes depends on whether the show asks for the package. If
+        # it does, the build is on the path already and the box decides whether
+        # to keep it there. If it does not, no package path can help -- rez
+        # resolves what the request names -- so the box decides whether to add
+        # it to the request list.
+        if name in {p.name for p in self.appendable()}:
+            if (name in self._appended_dev) == on:
+                return
+            if on:
+                self._appended_dev.add(name)
+            else:
+                self._appended_dev.discard(name)
+            self._sync_dev_checks()
+            error = self.store.set_appended_dev_packages(sorted(self._appended_dev))
         else:
-            self._disabled_dev.discard(name)
-
-        self._sync_dev_checks()
-        error = self.store.set_disabled_dev_packages(sorted(self._disabled_dev))
+            if (name in self._disabled_dev) == (not on):
+                return
+            # By name, not by version: the checkbox says "use my build of
+            # this", and having 1.0.0 on while 0.9.0 is off would resolve to
+            # whichever rez picked anyway.
+            if on:
+                self._disabled_dev.discard(name)
+            else:
+                self._disabled_dev.add(name)
+            self._sync_dev_checks()
+            error = self.store.set_disabled_dev_packages(sorted(self._disabled_dev))
         if error:
             self.statusBar().showMessage(error, 8000)
 
@@ -1674,8 +1707,53 @@ class MainWindow(QMainWindow):
         if tool:
             self._show_packages(tool)
 
+    def _dev_is_on(self, name: str) -> bool:
+        """Is this dev package in the environment?
+
+        Two defaults behind one question. A package the show asks for is in the
+        environment already, so it is on unless you switched it off. One the
+        show does not ask for is not, so it is off unless you added it --
+        putting every build you happen to have into every environment is not a
+        default anyone would choose.
+        """
+        if name in {p.name for p in self.appendable()}:
+            return name in self._appended_dev
+        return name not in self._disabled_dev
+
+    def _mark_appended(self, listing: QListWidget) -> None:
+        """Paint the dev builds this window is adding to the resolve.
+
+        Their own colour and their own words: they are not one of the show's
+        packages with your version in it, which is what every other mark in
+        this list means. They are something the show never mentioned, put there
+        by the tick beside them.
+        """
+        added = {request_name(r) for r in self.appended_requests()}
+        appendable = {p.name for p in self.appendable()}
+        for row in range(listing.count()):
+            item = listing.item(row)
+            name = item.data(_PACKAGE_NAME_ROLE)
+            if not name or name not in appendable or item.data(_PROBLEM_ROLE):
+                continue
+            base = item.text().split("      ")[0]
+            if name in added:
+                item.setText("%s      appended to the environment" % base)
+                item.setForeground(QColor(_ROW_APPENDED))
+            else:
+                # Not in the resolve and not ticked: it is simply not in play,
+                # and saying nothing is the honest amount to say.
+                item.setText(base)
+                item.setForeground(QColor(_ROW_QUIET))
+
     def _sync_dev_checks(self) -> None:
-        """Make every row of a name agree, without re-entering the handler."""
+        """Make every row of a name agree, without re-entering the handler.
+
+        Also the place the two defaults are settled. A package the show asks
+        for starts ticked -- it is in the environment already. One the show
+        does not ask for starts unticked, because it is not, and adding every
+        build you happen to have to every environment is not a default anyone
+        would choose.
+        """
         blocked = self.dev_list.blockSignals(True)
         for row in range(self.dev_list.count()):
             item = self.dev_list.item(row)
@@ -1683,7 +1761,7 @@ class MainWindow(QMainWindow):
             if not name:
                 continue
             item.setCheckState(
-                Qt.Unchecked if name in self._disabled_dev else Qt.Checked
+                Qt.Checked if self._dev_is_on(name) else Qt.Unchecked
             )
         self.dev_list.blockSignals(blocked)
 
@@ -1859,8 +1937,15 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             "%s %s..." % ("Building" if building else "Linking", name)
         )
+        if building:
+            # A link is instant; a build is not, and blocks the loop while it
+            # runs. Without this the window looks hung for the length of it.
+            self._busy_progress()
         QApplication.processEvents()
-        ok, detail = action(source, dev_root())
+        try:
+            ok, detail = action(source, dev_root())
+        finally:
+            self._end_progress()
         if not ok:
             QMessageBox.critical(
                 self,
@@ -1999,6 +2084,20 @@ class MainWindow(QMainWindow):
 
     def _refresh_override_marks(self) -> None:
         """Flag packages in either root that shadow the current resolve."""
+        # Every row here is rewritten and some are reordered, and reordering a
+        # QListWidget takes items out and puts them back -- which reports as
+        # the user having changed a checkbox. Left unblocked, repainting the
+        # list silently rewrote the very state it was painting.
+        blocked = self.dev_list.blockSignals(True)
+        try:
+            self._refresh_override_marks_locked()
+        finally:
+            self.dev_list.blockSignals(blocked)
+        # One place decides what the boxes say, after the pass that knows which
+        # packages this resolve names.
+        self._sync_dev_checks()
+
+    def _refresh_override_marks_locked(self) -> None:
         self._winner_cache = {}
         tool = self._current_tool()
         requests = ()
@@ -2100,6 +2199,9 @@ class MainWindow(QMainWindow):
                     item.setText(base)
                     item.setForeground(QColor(_ROW_PLAIN))
 
+            if listing is self.dev_list:
+                self._mark_appended(listing)
+
             self._float_overrides(listing, overrides)
 
             if not frame.is_checked():
@@ -2138,6 +2240,17 @@ class MainWindow(QMainWindow):
                     parts.append("%d outranked" % outranked)
                 if unusable:
                     parts.append("%d unusable" % unusable)
+                if listing is self.dev_list:
+                    added = len(self.appended_requests())
+                    if added:
+                        # Said in the note rather than the alert: adding a
+                        # package is a thing you did on purpose, not something
+                        # that went wrong.
+                        frame.set_note(
+                            "%s%d appended"
+                            % ("%d in use  ·  " % in_use if in_use else "", added),
+                            "info",
+                        )
                 frame.set_alert("  \u00b7  ".join(parts))
             else:
                 frame.set_alert("")
@@ -2345,7 +2458,48 @@ class MainWindow(QMainWindow):
         if project is None or self._bootstrap is None or tool is None:
             return ()
         packages = tuple(self._bootstrap.packages.get(tool, ()))
-        return packages + self.show_package_requests()
+        return packages + self.show_package_requests() + self.appended_requests()
+
+    def appended_requests(self) -> tuple[str, ...]:
+        """Dev builds added to a resolve that does not ask for them.
+
+        Ticking a dev package the show never mentions puts it in the request
+        list. Nothing else in this window can do that: a package root only
+        offers a package, and rez takes what the request names -- so a build of
+        something the show has no opinion about sat in the list, switched on,
+        and reached nothing.
+
+        Newest version per name, since two versions of one name in one request
+        list is a resolve that fails for a reason nobody would guess.
+        """
+        if not self.dev_frame.is_checked() or not self._appended_dev:
+            return ()
+
+        named = {request_name(r) for r in self._show_requests()}
+        best: dict[str, LocalPackage] = {}
+        for package in self._dev_packages:
+            if package.name not in self._appended_dev or package.name in named:
+                continue
+            current = best.get(package.name)
+            if current is None or version_key(package.version) > version_key(
+                current.version
+            ):
+                best[package.name] = package
+        return tuple(best[name].request for name in sorted(best))
+
+    def _show_requests(self) -> tuple[str, ...]:
+        """What the show itself asks for, before anything is added."""
+        tool = self._current_tool()
+        if self._bootstrap is None or tool is None:
+            return ()
+        return tuple(self._bootstrap.packages.get(tool, ())) + (
+            self.show_package_requests()
+        )
+
+    def appendable(self) -> list[LocalPackage]:
+        """Dev packages this resolve does not name, which could be added."""
+        named = {request_name(r) for r in self._show_requests()}
+        return [p for p in self._dev_packages if p.name not in named]
 
     def show_package_requests(self) -> tuple[str, ...]:
         """The show packages appended to every resolve.
@@ -2541,6 +2695,19 @@ class MainWindow(QMainWindow):
                         "Dev packages switched off: %s" % ", ".join(present),
                     )
                 )
+
+        added = self.appended_requests()
+        if added:
+            # Not a warning: you asked for it. But the environment is not the
+            # one the show describes any more, and the session that behaves
+            # oddly two hours later should not have to guess why.
+            notes.append(
+                (
+                    "info",
+                    "Dev packages added to this environment, which the show "
+                    "does not ask for: %s" % ", ".join(added),
+                )
+            )
 
         missing = self.missing_from_rez_path()
         if missing:

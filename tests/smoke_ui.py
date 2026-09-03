@@ -1940,12 +1940,38 @@ check(
         for i in range(window.dev_list.count())
     ),
 )
+# One question behind the box -- is this package in the environment -- with two
+# defaults, because the two kinds of package start in different places.
+_appendable = {p.name for p in window.appendable()}
 check(
-    "all ticked to begin with",
+    "a package the show asks for starts ticked: it is in there already",
     all(
         window.dev_list.item(i).checkState() == Qt.Checked
         for i in range(window.dev_list.count())
+        if window.dev_list.item(i).data(_NAME_ROLE) not in _appendable
     ),
+    str(
+        [
+            (window.dev_list.item(i).text(), window.dev_list.item(i).checkState())
+            for i in range(window.dev_list.count())
+        ]
+    ),
+)
+check(
+    "and one it does not asks starts unticked: putting every build you have "
+    "into every environment is not a default anyone would choose",
+    _appendable
+    and all(
+        window.dev_list.item(i).checkState() == Qt.Unchecked
+        for i in range(window.dev_list.count())
+        if window.dev_list.item(i).data(_NAME_ROLE) in _appendable
+    ),
+    str(sorted(_appendable)),
+)
+check(
+    "nothing appended until something is ticked",
+    window.appended_requests() == (),
+    str(window.appended_requests()),
 )
 check(
     "local packages have none, so no boxes appear - it is a whole-root call",
@@ -2007,6 +2033,89 @@ check(
     or window.dev_frame.note.text() == "",
     window.dev_frame.note.text(),
 )
+
+print("\nticking a dev package the show never mentions adds it to the request")
+# A package root only *offers* a package; rez resolves what the request names.
+# So a build of something the show has no opinion about sat in the list,
+# switched on, and reached nothing at all -- there was no way to get it into an
+# environment from this window.
+_extra = sorted(p.name for p in window.appendable())
+check("the fixture has some", bool(_extra), str(_extra))
+_pick = _extra[0]
+_row = next(
+    window.dev_list.item(i)
+    for i in range(window.dev_list.count())
+    if window.dev_list.item(i).data(_NAME_ROLE) == _pick
+)
+_before = window.resolved_packages()
+check("not in the request list to begin with", not any(r.startswith(_pick) for r in _before))
+
+_row.setCheckState(Qt.Checked)
+QApplication.processEvents()
+_after = window.resolved_packages()
+check(
+    "ticking it puts it in",
+    any(r.startswith(_pick + "-") for r in _after),
+    str([r for r in _after if _pick in r]),
+)
+check(
+    "at the end, so the show's own list is untouched",
+    _after[: len(_before)] == _before,
+    "%s vs %s" % (str(_after[-2:]), str(_before[-2:])),
+)
+check("and it is remembered", window.store.appended_dev_packages() == (_pick,),
+      str(window.store.appended_dev_packages()))
+
+_row = next(
+    window.dev_list.item(i)
+    for i in range(window.dev_list.count())
+    if window.dev_list.item(i).data(_NAME_ROLE) == _pick
+)
+check(
+    "the row says what it is, in its own colour",
+    "appended to the environment" in _row.text()
+    and _row.foreground().color().name() == mw_mod._ROW_APPENDED,
+    "%s / %s" % (_row.text(), _row.foreground().color().name()),
+)
+check(
+    "the section counts it, as a note rather than an alert",
+    "appended" in window.dev_frame.note.text(),
+    window.dev_frame.note.text(),
+)
+_notes = window.launch_notes()
+check(
+    "and the launch says so, since the environment is not the show's any more",
+    any("does not ask for" in t and _pick in t for _l, t in _notes),
+    str(_notes),
+)
+check(
+    "as information, not a warning - you asked for it",
+    all(l == "info" for l, t in _notes if _pick in t),
+    str(_notes),
+)
+_banner = launcher.launch_banner(window.highlight_roots(), _notes)
+check(
+    "which reaches the terminal too",
+    _pick in _banner and "_bcC" in _banner,
+    _banner[:400],
+)
+
+# Two versions of one name in one request list is a resolve that fails for a
+# reason nobody would guess.
+check(
+    "one request per name, the newest",
+    len([r for r in window.appended_requests() if r.startswith(_pick + "-")]) == 1,
+    str(window.appended_requests()),
+)
+
+_row.setCheckState(Qt.Unchecked)
+QApplication.processEvents()
+check(
+    "unticking takes it back out",
+    not any(r.startswith(_pick + "-") for r in window.resolved_packages()),
+    str(window.resolved_packages()[-3:]),
+)
+check("and forgets it", window.store.appended_dev_packages() == ())
 
 print("\nan unticked dev package leaves the resolve through a filtered root")
 _saved_rez = os.environ.get("REZ_PACKAGES_PATH")

@@ -504,6 +504,33 @@ Every installed row in Dev Packages has its own tick. Untick one and it stays
 out of the resolve, with the studio version used instead. Only the off ones are
 saved, so a package you install tomorrow is in play without you going to find it.
 
+#### Adding one the show never asks for
+
+A package root only *offers* a package; rez resolves what the request names. So
+a dev build of something the show has no opinion about sat in the list,
+switched on, and reached nothing — there was no way to get it into an
+environment from this window at all.
+
+Ticking such a package **appends it to the request list**. The row turns blue
+and says *appended to the environment*, the section header counts it, and the
+launch report says so in the terminal — the environment is no longer the one
+the show describes, and the session that behaves oddly two hours later should
+not have to guess why. It is reported as information rather than a warning:
+you asked for it.
+
+One checkbox, one question — *is this dev package in the environment* — with
+two defaults, because the two kinds of package start in different places:
+
+| | Default | What the box does |
+|---|---|---|
+| The show asks for it | ticked | keeps your build on the packages path |
+| The show does not | unticked | adds it to the request list |
+
+Only the newest version of a name is appended: two versions of one name in one
+request list is a resolve that fails for a reason nobody would guess. The
+choice is remembered per package, and only the *on* ones are stored — the
+mirror of the disabled set, and for the same reason.
+
 An unticked package does not go grey. It keeps saying what ticking it would do
 — `would override nuke_utils-4` — in the same hue as *in use*, darker.
 Unticking a build does not make it irrelevant to the show; it just is not in

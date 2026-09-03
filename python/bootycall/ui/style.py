@@ -256,6 +256,7 @@ QLabel#collapsibleNote {
 }
 QLabel#collapsibleNote[level="warn"]  { color: #e0a23c; background: rgba(224, 162, 60, 0.15); }
 QLabel#collapsibleNote[level="error"] { color: #e06c75; background: rgba(224, 108, 117, 0.15); }
+QLabel#collapsibleNote[level="info"]  { color: #4aa3df; background: rgba(74, 163, 223, 0.15); }
 
 /* Always red: it only ever says how many of your packages lost. */
 QLabel#collapsibleAlert {

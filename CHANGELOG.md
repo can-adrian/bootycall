@@ -10,6 +10,40 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.15.0
+
+Minor: a dev package can now be put into an environment that never asked for it.
+
+- **Ticking a dev package the show does not name appends it to the request
+  list.** A package root only *offers* a package; rez resolves what the request
+  names. So a build of something the show has no opinion about sat in the list,
+  switched on, and reached nothing — there was no way to get it into an
+  environment from this window at all.
+
+  The row turns blue and says *appended to the environment*, the section header
+  counts it, and the launch report says so in the terminal, in its own colour.
+  Reported as information, not a warning: you asked for it. But the environment
+  is not the one the show describes any more, and that is worth saying once.
+
+  One checkbox, one question — *is this dev package in the environment* — with
+  two defaults. A package the show asks for starts ticked, because it is in
+  there already. One the show does not asks starts unticked, because it is not:
+  putting every build you happen to have into every environment is not a
+  default anyone would choose. Only the newest version of a name is appended.
+
+- **Fixed the list rewriting the state it was painting.** Reordering a
+  `QListWidget` takes items out and puts them back, which reports as the user
+  having changed a checkbox — so the pass that floats overrides to the top fed
+  its own reordering back into the handler. Harmless while both sets meant the
+  same thing; with two it silently switched packages on and off during a
+  refresh. The repaint is blocked now, and one place decides what the boxes
+  say.
+
+- **The progress bar shows during a build**, not only during Update Dev
+  Installs. Install, Re-install and Link all run `rez-build`, which blocks for
+  seconds to a minute with the window looking hung. (The bar was already at the
+  bottom of the expanded window — it is 3px and easy to miss.)
+
 ## 0.14.0
 
 Minor: linking a package with variants works now, instead of being refused.

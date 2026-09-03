@@ -338,6 +338,28 @@ class ConfigStore:
             self._preferences.pop("disabled_dev_packages", None)
         return self.save()
 
+    def appended_dev_packages(self) -> tuple[str, ...]:
+        """Dev package names to add to a resolve that does not ask for them.
+
+        The mirror of :meth:`disabled_dev_packages`, and stored the opposite way
+        round for the same reason. A dev package the show names is in play
+        unless you say otherwise; one the show does not name is *not* in play
+        unless you say so, because adding every build you happen to have to
+        every environment is not a default anyone would choose.
+        """
+        stored = self._preferences.get("appended_dev_packages")
+        if not isinstance(stored, list):
+            return ()
+        return tuple(str(n) for n in stored if str(n).strip())
+
+    def set_appended_dev_packages(self, names: Sequence[str]) -> str:
+        cleaned = sorted({str(n).strip() for n in names if str(n).strip()})
+        if cleaned:
+            self._preferences["appended_dev_packages"] = cleaned
+        else:
+            self._preferences.pop("appended_dev_packages", None)
+        return self.save()
+
     def selected_dcc(self) -> str | None:
         """The software tile that was active when the state was last saved."""
         value = self._preferences.get("selected_dcc")

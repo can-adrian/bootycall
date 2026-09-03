@@ -228,7 +228,13 @@ def resolved_for(probe: ResolveProbe, name: str) -> tuple[str, str]:
 
 
 #: Colour per note level, as a shell variable name.
-_LEVELS = {"ok": "_bcG", "warn": "_bcY", "error": "_bcR", "": "_bcD"}
+_LEVELS = {
+    "ok": "_bcG",
+    "warn": "_bcY",
+    "error": "_bcR",
+    "info": "_bcC",
+    "": "_bcD",
+}
 
 #: Colour per highlighted root label, as a shell variable name. rez already
 #: marks its own local path green, so local packages keep green and dev ones
@@ -278,10 +284,11 @@ def launch_banner(
         # package is not a local one, and next to green at a glance yellow
         # reads as "the same but brighter".
         "    _bcO=$(printf '\\033[38;5;208m')",
+        "    _bcC=$(printf '\\033[38;5;39m')",
         "    _bcD=$(printf '\\033[2m')",
         "    _bc0=$(printf '\\033[0m')",
         "else",
-        "    _bcB= _bcG= _bcY= _bcR= _bcO= _bcD= _bc0=",
+        "    _bcB= _bcG= _bcY= _bcR= _bcO= _bcC= _bcD= _bc0=",
         "fi",
         "",
         "printf '%s\\n' \"${_bcB}BootyCall${_bc0}${_bcD}"
