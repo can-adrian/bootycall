@@ -10,6 +10,23 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.17.1
+
+Patch: on every workspace at full size too.
+
+- **"Visible on all workspaces" is no longer tied to compact mode.** The two
+  window hints were one setting and they are not the same thing: a full-size
+  window that refuses to go behind anything is a nuisance, so always-on-top is
+  still compact-only, but being on every workspace costs nothing at either
+  size. A launcher you have to go and find is a launcher you stop using.
+
+- **And it is applied on the first show**, not only when compact mode is
+  toggled — so a window that was never collapsed never got it at all, which is
+  the other half of why this looked like it did not work.
+
+- `BOOTYCALL_STICKY=0` for a session that would rather the window stayed on the
+  workspace it was opened on.
+
 ## 0.17.0
 
 Minor: several worktrees of one package are several packages to manage.

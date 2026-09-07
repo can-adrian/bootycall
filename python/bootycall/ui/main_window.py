@@ -279,6 +279,8 @@ class MainWindow(QMainWindow):
         self._use_dev = self.store.use_dev()
         #: Installed dev packages switched off by name. Only the off ones
         #: are held, so a newly installed package is in play by default.
+        #: Set once the window has been shown and the hints have been applied.
+        self._hinted = False
         self._disabled_dev: set[str] = set(self.store.disabled_dev_packages())
         self._appended_dev: set[str] = set(self.store.appended_dev_packages())
         self._preferred_dcc = self.store.selected_dcc()
@@ -3003,18 +3005,42 @@ class MainWindow(QMainWindow):
 
         self.move(x, y)
 
-    def _apply_window_hints(self) -> None:
-        """Compact is a always-on-top, every-workspace launcher bar.
+    def showEvent(self, event) -> None:
+        """Apply the window hints once the window has a native id.
 
-        Both hints are dropped when the window expands again: a full-size window
-        that refuses to go behind anything is a nuisance, not a feature.
+        There is no id to hand wmctrl before the window is shown, and the hints
+        used to be applied only when compact mode was toggled -- so a window
+        that was never collapsed never got them at all.
+        """
+        super().showEvent(event)
+        if not self._hinted:
+            self._hinted = True
+            self._apply_window_hints()
+
+    def _apply_window_hints(self) -> None:
+        """Always on top while compact; on every workspace either way.
+
+        The two were one setting and they are not the same thing. A full-size
+        window that refuses to go behind anything is a nuisance, so
+        always-on-top is still dropped when the window expands. Being on every
+        workspace costs nothing at either size, and a launcher you have to go
+        and find is a launcher you stop using.
         """
         platform_hints.set_always_on_top(self, self._compact)
-        note = platform_hints.set_visible_on_all_workspaces(self, self._compact)
-        if self._compact and note:
-            # Worth saying once, not worth blocking on.
+
+        sticky = config.sticky_window()
+        note = platform_hints.set_visible_on_all_workspaces(self, sticky)
+        if note and sticky:
+            # Worth saying once, not worth blocking on. On the button that
+            # changes size, because that is where it used to be looked for.
             self.compact_button.setToolTip(
-                "Back to the full window (Ctrl+M)\n\nNote: %s" % note
+                "%s\n\nNote: %s"
+                % (
+                    "Back to the full window (Ctrl+M)"
+                    if self._compact
+                    else "Collapse to a compact launcher (Ctrl+M)",
+                    note,
+                )
             )
 
     def _apply_compact_filter(self) -> None:

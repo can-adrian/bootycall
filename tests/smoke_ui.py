@@ -1331,6 +1331,54 @@ check(
     platform_hints._sticky_commands(54525955, False)[0][-1] == "remove,sticky",
     str(platform_hints._sticky_commands(54525955, False)[0]),
 )
+# The two hints were one setting and they are not the same thing. A full-size
+# window that refuses to go behind anything is a nuisance; being on every
+# workspace costs nothing at either size, and a launcher you have to go and
+# find is a launcher you stop using.
+from bootycall import config as _cfg_hints  # noqa: E402
+
+_hints = []
+_real_sticky = platform_hints.set_visible_on_all_workspaces
+_real_ontop = platform_hints.set_always_on_top
+platform_hints.set_visible_on_all_workspaces = (
+    lambda w, on: (_hints.append(("sticky", on)), "")[1]
+)
+platform_hints.set_always_on_top = lambda w, on: _hints.append(("ontop", on))
+try:
+    window.set_compact(True)
+    QApplication.processEvents()
+    check("compact asks for both", set(_hints) == {("ontop", True), ("sticky", True)}, str(_hints))
+    _hints.clear()
+    window.set_compact(False)
+    QApplication.processEvents()
+    check(
+        "expanded keeps the workspace hint and drops always-on-top",
+        set(_hints) == {("ontop", False), ("sticky", True)},
+        str(_hints),
+    )
+    _hints.clear()
+    _saved_sticky = _cfg_hints.STICKY_WINDOW
+    _cfg_hints.STICKY_WINDOW = False
+    window.set_compact(True)
+    QApplication.processEvents()
+    _cfg_hints.STICKY_WINDOW = _saved_sticky
+    check(
+        "and a site that would rather it stayed put can say so",
+        ("sticky", False) in _hints,
+        str(_hints),
+    )
+finally:
+    platform_hints.set_visible_on_all_workspaces = _real_sticky
+    platform_hints.set_always_on_top = _real_ontop
+    window.set_compact(False)
+    QApplication.processEvents()
+
+check(
+    "and the hints are applied on first show, not only on a compact toggle",
+    window._hinted,
+    "a window never collapsed never got them at all",
+)
+
 check(
     "without xprop there is no way to check, which is not the same as failure",
     platform_hints.sticky_state(54525955) is None

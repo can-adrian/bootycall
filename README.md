@@ -908,16 +908,23 @@ application name and draw a bar around that instead.
 
 ### Staying put
 
-Compact mode asks the window manager for two things, and drops both when you
-expand — a full-size window that refuses to go behind anything is a nuisance.
+Two hints, and they are not the same thing.
 
-- **Always on top** is a Qt flag and works everywhere. Setting it makes Qt
-  recreate the native window, so the geometry is restored afterwards.
-- **Visible on all workspaces** is X11's `_NET_WM_STATE_STICKY`, which Qt has
-  no API for. It's done through `wmctrl` or `xdotool`, whichever is installed,
-  and it is a nicety: a session without either still gets a working compact
-  window, and the toggle's tooltip says what was skipped. Wayland has no
-  equivalent by design; macOS and Windows manage this themselves.
+- **Always on top** is asked for in compact mode and dropped when you expand: a
+  full-size window that refuses to go behind anything is a nuisance. It is a Qt
+  flag and works everywhere. Setting it makes Qt recreate the native window, so
+  the geometry is restored afterwards.
+- **Visible on all workspaces** is asked for at both sizes, and applied on the
+  first show rather than only when compact mode is toggled — a window that was
+  never collapsed never got it at all. It costs nothing at full size, and a
+  launcher you have to go and find is a launcher you stop using.
+  `BOOTYCALL_STICKY=0` for a session that would rather it stayed where it was
+  opened.
+That second one is X11's `_NET_WM_STATE_STICKY`, which Qt has no API for. It's
+done through `wmctrl` or `xdotool`, whichever is installed, and it is a nicety:
+a session without either still gets a working window, and the size toggle's
+tooltip says what was skipped. Wayland has no equivalent by design; macOS and
+Windows manage this themselves.
 
   The window id goes to those helpers as **hex**. `wmctrl -i` parses its
   argument as base 16, so a decimal id was read as a different, usually
@@ -1170,6 +1177,7 @@ the ones below, and are handy for pointing a session at a test tree:
 | `BOOTYCALL_SHOW_RESOLVE_INFO` | `1` |
 | `BOOTYCALL_SCRIPT_DIR` | `$TMPDIR`, else the platform default (`/tmp`) |
 | `BOOTYCALL_SHOW_ENV_VARS` | `ILP_SHOW:ILP_CONTEXT_SHOW:SHOW:BOOTYCALL_SHOW` |
+| `BOOTYCALL_STICKY` | `1` — keep the window on every workspace |
 
 `BOOTYCALL_APPENDED` is *set* by a launch rather than read: the space-separated
 names BootyCall added to the request list itself. The launch report reads it to

@@ -309,6 +309,24 @@ SHOW_RESOLVE_INFO = os.environ.get(
 ).strip().lower() not in ("0", "no", "false", "off")
 
 
+#: Keep the window on every workspace, expanded as well as compact.
+#:
+#: Always-on-top stays compact-only -- a full-size window that refuses to go
+#: behind anything is a nuisance -- but being on every workspace is not the
+#: same thing, and a launcher you have to go and find is a launcher you stop
+#: using.
+#:
+#: Override with BOOTYCALL_STICKY=0 for a session that would rather it stayed
+#: on the workspace it was opened on.
+STICKY_WINDOW = os.environ.get(
+    "BOOTYCALL_STICKY", "1"
+).strip().lower() not in ("0", "no", "false", "off")
+
+
+def sticky_window() -> bool:
+    return STICKY_WINDOW
+
+
 def show_resolve_info() -> bool:
     return SHOW_RESOLVE_INFO
 
