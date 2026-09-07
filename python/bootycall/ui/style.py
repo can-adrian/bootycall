@@ -85,6 +85,10 @@ QLineEdit#filterField {
     padding: 5px 9px;
 }
 QLineEdit#filterField:focus { border-color: #4a90d9; }
+/* A path that is not there. Only the border: tinting the text would fight the
+   placeholder, which is the default path and perfectly valid. */
+QLineEdit#filterField[state="bad"] { border-color: #6d3b40; }
+QLineEdit#filterField[state="bad"]:focus { border-color: #e06c75; }
 
 QListView {
     background: #0e1c2b;

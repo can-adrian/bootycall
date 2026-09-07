@@ -1,13 +1,21 @@
 """
-Settings: the three roots BootyCall reads.
+Settings: the roots BootyCall reads.
 
 Paths resolve in three layers -- the shipped constant, an environment variable,
 then whatever is set here. This dialog writes the third layer, so a field left
 blank means "use whatever the environment or the default says" rather than
 "use an empty path".
 
-Each row shows live feedback on whether the path exists, because a typo in a
-network path is otherwise invisible until the section it feeds comes up empty.
+The dialog is four rows and a panel. It used to carry, under every field, a
+paragraph explaining it and a line reporting what the path resolved to -- so
+four fields came with eight blocks of supporting text, all visible at once,
+none of them about whatever you were actually typing in. The explanation is
+worth having; having all four at all times is not.
+
+So the panel at the bottom describes the field you are in, and says nothing
+about the other three. And it reports a path only when the path is missing:
+"found" on a path that is fine is a line you read once and then have to read
+past forever.
 """
 
 from __future__ import annotations
@@ -19,18 +27,18 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
     QVBoxLayout,
-    QWidget,
 )
 
 from .. import config
 from ..local_packages import current_user
 
-#: key -> (label, what it feeds, whether it takes {user}/{local} placeholders)
+#: key -> (label, what it feeds, which placeholders it takes)
 FIELDS: tuple[tuple[str, str, str, str], ...] = (
     (
         "shows_root",
@@ -42,145 +50,67 @@ FIELDS: tuple[tuple[str, str, str, str], ...] = (
     (
         "local_root",
         "Local packages",
-        "Your per-user package root. {user} is substituted.",
+        "Your per-user package root.",
         "{user}",
     ),
     (
         "dev_root",
-        "Installed dev packages",
+        "Dev packages",
         "Where your installed dev packages land, and what rez resolves. "
-        "{local} is the resolved local root, so leaving it as {local}/dev "
-        "keeps the two together.",
+        "Leaving it as {local}/dev keeps the two together.",
         "{user}, {local}",
     ),
     (
         "dev_working_root",
         "Dev working location",
-        "Where you edit dev packages, before installing them. Install Package "
-        "browses this, and BootyCall compares it against your installed dev "
-        "packages to tell you when one is out of date.",
+        "Where you edit dev packages, before installing them. The dev list "
+        "reads this, and compares it against your installed packages to say "
+        "when one is out of date.",
         "{user}, {home}, {local}",
     ),
 )
 
 
-class _PathRow(QWidget):
-    """One labelled path field with a Browse button and a live status line."""
+def resolve(key: str, raw: str) -> str:
+    """What a field resolves to, defaults and placeholders included.
 
-    changed = Signal()
+    Every placeholder is offered to every row rather than a per-key list: a
+    field that silently ignores ``{home}`` because of which row it is in is a
+    rule nobody can see from the dialog.
+    """
+    text = raw.strip() or config.path_defaults()[key]
+    user = current_user()
+    try:
+        expanded = text.format(
+            user=user,
+            home=os.path.expanduser("~"),
+            local=config.local_root_template().format(user=user),
+        )
+    except (KeyError, IndexError):
+        # An unknown placeholder is the user's typo to see, not ours to
+        # swallow -- showing the raw text makes it obvious what happened.
+        return text
+    return os.path.expanduser(expanded)
 
-    def __init__(self, key: str, label: str, helptext: str, tokens: str, parent=None):
-        super().__init__(parent)
-        self.key = key
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+class _PathField(QLineEdit):
+    """A path field that says when it is entered."""
 
-        heading = QLabel(label)
-        heading.setObjectName("sectionLabel")
-        layout.addWidget(heading)
+    entered = Signal()
 
-        row = QHBoxLayout()
-        row.setSpacing(8)
-        self.edit = QLineEdit()
-        self.edit.setObjectName("filterField")
-        self.edit.setPlaceholderText(config.path_defaults()[key])
-        self.edit.textChanged.connect(self._on_changed)
-        row.addWidget(self.edit, 1)
-
-        self.browse_button = QPushButton("Browse...")
-        self.browse_button.clicked.connect(self._on_browse)
-        row.addWidget(self.browse_button)
-        layout.addLayout(row)
-
-        note = helptext
-        if tokens:
-            note += "  Placeholders: %s" % tokens
-        self.help_label = QLabel(note)
-        self.help_label.setObjectName("hint")
-        self.help_label.setWordWrap(True)
-        layout.addWidget(self.help_label)
-
-        self.status = QLabel("")
-        self.status.setObjectName("statusLabel")
-        layout.addWidget(self.status)
-
-    # -- value -------------------------------------------------------------
-
-    def value(self) -> str:
-        return self.edit.text().strip()
-
-    def set_value(self, value: str) -> None:
-        self.edit.setText(value or "")
-
-    def effective(self) -> str:
-        """What this row resolves to, defaults and placeholders included.
-
-        Every placeholder is offered to every row rather than a per-key list:
-        a field that silently ignores {home} because of which row it is in is
-        a rule nobody can see from the dialog.
-        """
-        raw = self.value() or config.path_defaults()[self.key]
-        user = current_user()
-        try:
-            expanded = raw.format(
-                user=user,
-                home=os.path.expanduser("~"),
-                local=config.local_root_template().format(user=user),
-            )
-        except (KeyError, IndexError):
-            # An unknown placeholder is the user's typo to see, not ours to
-            # swallow -- showing the raw text makes it obvious what happened.
-            return raw
-        return os.path.expanduser(expanded)
-
-    # -- feedback ----------------------------------------------------------
-
-    def refresh_status(self) -> None:
-        resolved = self.effective()
-        exists = Path(resolved).is_dir()
-        using_default = not self.value()
-
-        if exists:
-            text = "%s  -  found" % resolved
-            level = "ok"
-        else:
-            # Not an error: a dev root you have not made yet is normal, and the
-            # sections say so themselves. Worth flagging, not worth blocking.
-            text = "%s  -  does not exist yet" % resolved
-            level = "error"
-        if using_default:
-            text += "   (default)"
-
-        self.status.setText(text)
-        if self.status.property("level") != level:
-            self.status.setProperty("level", level)
-            self.status.style().unpolish(self.status)
-            self.status.style().polish(self.status)
-
-    def _on_changed(self) -> None:
-        self.refresh_status()
-        self.changed.emit()
-
-    def _on_browse(self) -> None:
-        start = self.effective()
-        if not Path(start).is_dir():
-            start = str(Path.home())
-        chosen = QFileDialog.getExistingDirectory(self, "Choose a folder", start)
-        if chosen:
-            self.edit.setText(chosen)
+    def focusInEvent(self, event) -> None:
+        super().focusInEvent(event)
+        self.entered.emit()
 
 
 class SettingsDialog(QDialog):
-    """Edit the three roots. Applies on OK; Reset clears back to defaults."""
+    """Edit the roots. Applies on Save; Reset clears back to defaults."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Settings")
         self.setModal(True)
-        self.resize(620, 520)
-        self.setMinimumWidth(520)
+        self.setMinimumWidth(560)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 18, 20, 16)
@@ -190,24 +120,71 @@ class SettingsDialog(QDialog):
         heading.setObjectName("dialogTitle")
         layout.addWidget(heading)
 
-        subtitle = QLabel(
-            "Leave a field blank to use the default shown in grey. Changes apply "
-            "when you press Save."
-        )
+        subtitle = QLabel("Leave a field blank to use the default shown in grey.")
         subtitle.setObjectName("subtitle")
-        subtitle.setWordWrap(True)
         layout.addWidget(subtitle)
 
-        overrides = config.path_overrides()
-        self.rows: dict[str, _PathRow] = {}
-        for key, label, helptext, tokens in FIELDS:
-            row = _PathRow(key, label, helptext, tokens)
-            row.set_value(overrides.get(key, ""))
-            row.refresh_status()
-            layout.addWidget(row)
-            self.rows[key] = row
+        # A grid, so the fields line up and the Browse column is one width
+        # rather than four. In a per-row box layout the button was sized by
+        # whatever space the row had left, which is how it ended up clipped.
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(8)
+        grid.setColumnStretch(1, 1)
 
+        overrides = config.path_overrides()
+        self.rows: dict[str, _PathField] = {}
+        self._help: dict[str, str] = {}
+
+        for line, (key, label, helptext, tokens) in enumerate(FIELDS):
+            caption = QLabel(label)
+            caption.setObjectName("hint")
+            grid.addWidget(caption, line, 0, Qt.AlignRight | Qt.AlignVCenter)
+
+            edit = _PathField()
+            edit.setObjectName("filterField")
+            edit.setPlaceholderText(config.path_defaults()[key])
+            edit.setText(overrides.get(key, ""))
+            edit.textChanged.connect(
+                lambda _text, k=key: self._on_changed(k)
+            )
+            edit.entered.connect(lambda k=key: self._describe(k))
+            grid.addWidget(edit, line, 1)
+
+            browse = QPushButton("Browse")
+            # Both to the taller of the two hints. A fixed height taken from
+            # the field alone is how the button ended up clipped: its own hint
+            # is larger, because the stylesheet gives it more padding.
+            tall = max(edit.sizeHint().height(), browse.sizeHint().height())
+            browse.setFixedHeight(tall)
+            edit.setFixedHeight(tall)
+            browse.clicked.connect(lambda _checked, k=key: self._on_browse(k))
+            grid.addWidget(browse, line, 2)
+
+            self.rows[key] = edit
+            self._help[key] = helptext + (
+                "  Placeholders: %s" % tokens if tokens else ""
+            )
+
+        layout.addLayout(grid)
         layout.addStretch(1)
+
+        # One panel, always the same height, so nothing below it moves as the
+        # text in it changes.
+        self.detail = QLabel("")
+        self.detail.setObjectName("hint")
+        self.detail.setWordWrap(True)
+        self.detail.setMinimumHeight(34)
+        self.detail.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        layout.addWidget(self.detail)
+
+        self.problem = QLabel("")
+        self.problem.setObjectName("statusLabel")
+        self.problem.setProperty("level", "error")
+        self.problem.setWordWrap(True)
+        self.problem.setMinimumHeight(18)
+        self.problem.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        layout.addWidget(self.problem)
 
         footer = QHBoxLayout()
         footer.setSpacing(8)
@@ -227,15 +204,70 @@ class SettingsDialog(QDialog):
         footer.addWidget(self.save_button)
         layout.addLayout(footer)
 
-    # -- results -----------------------------------------------------------
+        for key in self.rows:
+            self._mark(key)
+        self._describe(next(iter(self.rows)))
+        self.adjustSize()
+
+    # -- values ------------------------------------------------------------
+
+    def value(self, key: str) -> str:
+        return self.rows[key].text().strip()
+
+    def effective(self, key: str) -> str:
+        return resolve(key, self.rows[key].text())
 
     def overrides(self) -> dict[str, str]:
         """Only the fields the user actually filled in."""
-        return {
-            key: row.value() for key, row in self.rows.items() if row.value()
-        }
+        return {key: self.value(key) for key in self.rows if self.value(key)}
+
+    def missing(self) -> list[str]:
+        """Keys whose path is not a directory. Empty when everything is there."""
+        return [k for k in self.rows if not Path(self.effective(k)).is_dir()]
+
+    # -- feedback ----------------------------------------------------------
+
+    def _describe(self, key: str) -> None:
+        """Say what the field you are in is for, and only that field."""
+        self._current = key
+        label = dict((f[0], f[1]) for f in FIELDS)[key]
+        self.detail.setText("%s — %s" % (label, self._help[key]))
+        self._show_problem(key)
+
+    def _show_problem(self, key: str) -> None:
+        resolved = self.effective(key)
+        if Path(resolved).is_dir():
+            # Nothing to say. A path that is fine does not need a line about
+            # being fine.
+            self.problem.setText("")
+        else:
+            self.problem.setText("Not found: %s" % resolved)
+
+    def _mark(self, key: str) -> None:
+        """Tint a field whose path is missing, so it shows without clicking."""
+        edit = self.rows[key]
+        state = "" if Path(self.effective(key)).is_dir() else "bad"
+        if edit.property("state") != state:
+            edit.setProperty("state", state)
+            edit.style().unpolish(edit)
+            edit.style().polish(edit)
+
+    def _on_changed(self, key: str) -> None:
+        self._mark(key)
+        if getattr(self, "_current", None) == key:
+            self._show_problem(key)
+
+    def _on_browse(self, key: str) -> None:
+        start = self.effective(key)
+        if not Path(start).is_dir():
+            start = str(Path.home())
+        chosen = QFileDialog.getExistingDirectory(self, "Choose a folder", start)
+        if chosen:
+            self.rows[key].setText(chosen)
+            self._describe(key)
 
     def _on_reset(self) -> None:
-        for row in self.rows.values():
-            row.set_value("")
-            row.refresh_status()
+        for key, edit in self.rows.items():
+            edit.setText("")
+            self._mark(key)
+        self._describe(getattr(self, "_current", next(iter(self.rows))))

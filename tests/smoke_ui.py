@@ -1463,31 +1463,92 @@ check("and the software one is plural", "Softwares" in _menus, str(_menus))
 check("and a File entry too", window.settings_action in window.file_menu.actions())
 
 dialog = SettingsDialog(window)
+# Shown, because focus events are what move the description panel and an
+# unshown dialog delivers none.
+dialog.show()
+QApplication.processEvents()
 check("four rows", list(dialog.rows) == ["shows_root", "local_root", "dev_root", "dev_working_root"], str(list(dialog.rows)))
 check("blank by default - nothing overridden yet", dialog.overrides() == {}, str(dialog.overrides()))
 check(
     "each row shows the default as its placeholder",
-    dialog.rows["shows_root"].edit.placeholderText() == cfg_mod.path_defaults()["shows_root"],
-    dialog.rows["shows_root"].edit.placeholderText(),
+    dialog.rows["shows_root"].placeholderText() == cfg_mod.path_defaults()["shows_root"],
+    dialog.rows["shows_root"].placeholderText(),
 )
 check(
-    "and reports the resolved path, not the template",
-    "adrian" in dialog.rows["local_root"].status.text(),
-    dialog.rows["local_root"].status.text(),
-)
-check(
-    "an existing path reads as found",
-    dialog.rows["shows_root"].status.property("level") == "ok",
-    dialog.rows["shows_root"].status.text(),
+    "and resolves the template rather than showing it",
+    "adrian" in dialog.effective("local_root"),
+    dialog.effective("local_root"),
 )
 
-dialog.rows["shows_root"].set_value("/tmp/does/not/exist")
+# Four fields used to carry four paragraphs and four status lines, all visible
+# at once, none of them about whatever you were typing in. One panel, about the
+# field you are in.
+dialog.rows["dev_root"].setFocus()
+QApplication.processEvents()
+check(
+    "the panel describes the field you are in",
+    dialog.detail.text().startswith("Dev packages"),
+    dialog.detail.text(),
+)
+dialog.rows["shows_root"].setFocus()
+QApplication.processEvents()
+check(
+    "and follows you to the next one",
+    dialog.detail.text().startswith("Shows root"),
+    dialog.detail.text(),
+)
+check(
+    "a path that is there says nothing - 'found' is a line you read once",
+    dialog.problem.text() == "",
+    dialog.problem.text(),
+)
+
+dialog.rows["shows_root"].setText("/tmp/does/not/exist")
 QApplication.processEvents()
 check(
     "a missing path is flagged, not silently accepted",
-    dialog.rows["shows_root"].status.property("level") == "error"
-    and "does not exist" in dialog.rows["shows_root"].status.text(),
-    dialog.rows["shows_root"].status.text(),
+    "Not found" in dialog.problem.text()
+    and "/tmp/does/not/exist" in dialog.problem.text(),
+    dialog.problem.text(),
+)
+check(
+    "and the field itself is marked, so it shows without clicking into it",
+    dialog.rows["shows_root"].property("state") == "bad",
+    str(dialog.rows["shows_root"].property("state")),
+)
+check(
+    "which the stylesheet has a rule for",
+    'QLineEdit#filterField[state="bad"]' in app.styleSheet(),
+)
+check(
+    "missing() names it without anything being focused",
+    "shows_root" in dialog.missing(),
+    str(dialog.missing()),
+)
+dialog.rows["shows_root"].setText("/tmp/ice/shows")
+QApplication.processEvents()
+check(
+    "and the mark clears when the path comes back",
+    dialog.rows["shows_root"].property("state") == ""
+    and dialog.problem.text() == "",
+    "%s / %s" % (dialog.rows["shows_root"].property("state"), dialog.problem.text()),
+)
+dialog.rows["shows_root"].setText("/tmp/does/not/exist")
+QApplication.processEvents()
+
+# The Browse buttons were sized by whatever space their row had left, which is
+# how they ended up clipped.
+_browse = [
+    b
+    for b in dialog.findChildren(type(dialog.save_button))
+    if b.text() == "Browse"
+]
+check("one Browse per field", len(_browse) == len(dialog.rows), str(len(_browse)))
+check(
+    "each tall enough for its own text, and all the same",
+    len({b.height() for b in _browse}) == 1
+    and all(b.height() >= b.sizeHint().height() for b in _browse),
+    str([(b.height(), b.sizeHint().height()) for b in _browse]),
 )
 check("it becomes an override", dialog.overrides() == {"shows_root": "/tmp/does/not/exist"}, str(dialog.overrides()))
 dialog._on_reset()

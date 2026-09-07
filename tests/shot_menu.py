@@ -61,7 +61,8 @@ menu.close()
 from bootycall.ui.settings_dialog import SettingsDialog  # noqa: E402
 
 dialog = SettingsDialog(window)
-dialog.resize(620, 520)
+# No resize: the dialog sizes itself to four rows and a panel, and stretching
+# it only adds the empty space the old one was full of.
 dialog.show()
 for _ in range(3):
     QApplication.processEvents()

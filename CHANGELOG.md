@@ -10,6 +10,27 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.18.0
+
+Minor: the Settings dialog is four rows and a panel.
+
+- **The Browse buttons are no longer clipped.** Each row was its own box
+  layout, so the button took whatever height the row had left rather than the
+  height it asked for. The rows are a grid now, and field and button are both
+  set to the taller of the two hints — so the fields line up, the Browse column
+  is one width instead of four, and nothing is cut off.
+
+- **One description, for the field you are in.** Four fields carried four
+  paragraphs and four status lines, all visible at once, none of them about
+  whatever you were typing in. Clicking a field now puts its description in a
+  panel at the bottom, and the panel is a fixed height so nothing moves as you
+  tab between them.
+
+- **A path that is there says nothing.** *"found"* is a line you read once and
+  then read past forever. Only a missing path speaks: the resolved path in red
+  at the bottom, and a red border on the field itself so a problem shows
+  without clicking into each one to look for it.
+
 ## 0.17.1
 
 Patch: on every workspace at full size too.

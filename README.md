@@ -1150,10 +1150,18 @@ produce the same environment is a choice with no content. So Houdini Core shows
 | Local packages | the Local packages section |
 | Dev packages | the Dev packages section |
 
-Each row shows what its path resolves to and whether that folder exists — a typo
-in a network path is otherwise invisible until the section it feeds comes up
-empty. A missing folder is flagged but not blocked: a dev root you haven't made
-yet is normal.
+Four rows and a panel. **Clicking a field puts its description at the bottom**,
+and only that field's — four paragraphs and four status lines, all on screen at
+once and none of them about whatever you were typing in, was most of what made
+this dialog hard to read. The panel is a fixed height, so nothing moves as you
+tab between fields.
+
+**A path that is there says nothing.** *"found"* is a line you read once and
+then read past forever. A path that is *not* there gets the resolved path in
+red at the bottom and a red border on the field, so a typo in a network path
+shows without clicking into each row to look for it. It is flagged, never
+blocked: a dev root you haven't made yet is normal, and the sections that feed
+off it say so themselves.
 
 Leave a field **blank** to use the default, shown greyed as the placeholder. The
 local root takes a `{user}` placeholder and the dev root takes `{local}` as well,
