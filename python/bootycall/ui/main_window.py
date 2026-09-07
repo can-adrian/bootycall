@@ -1506,12 +1506,41 @@ class MainWindow(QMainWindow):
         except OSError:
             return []
 
-        # By the name the package declares, not the folder it sits in: a
-        # checkout called rig_utils-alembic-properties builds a package called
-        # rig_utils_alembic_properties, and matching on the folder listed it as
-        # "not installed" beside the build it had just produced.
+        # Every checkout that is not the source of an install already in the
+        # list. Not "every checkout whose package name is not installed": with
+        # several worktrees of one package -- one per branch, which is the
+        # normal way to work on more than one at a time -- installing any of
+        # them made all the others vanish from the window.
+        #
+        # Which one an install came from is read off the install itself, and
+        # when that cannot be established none of the checkouts is claimed to
+        # be it. A row too many is a nuisance; the wrong row is a wrong answer.
+        built_from = set()
+        for package in installed:
+            source = dev_install.installed_source(package.path)
+            if source is not None:
+                try:
+                    built_from.add(source.resolve())
+                except OSError:
+                    continue
+
         known = {p.name for p in installed}
-        missing = [w for w in working if w.package_name not in known]
+        missing = []
+        for candidate in working:
+            try:
+                here = candidate.path.resolve()
+            except OSError:
+                here = candidate.path
+            if here in built_from:
+                continue
+            # One checkout, one install, nothing ambiguous: the old rule, kept
+            # for the ordinary case so a plain install does not grow a
+            # duplicate row.
+            if candidate.package_name in known and len(
+                [w for w in working if w.package_name == candidate.package_name]
+            ) == 1:
+                continue
+            missing.append(candidate)
         if not missing:
             return missing
 
@@ -1519,9 +1548,16 @@ class MainWindow(QMainWindow):
         if listing.count() == 1 and not listing.item(0).data(_PACKAGE_PATH_ROLE):
             listing.takeItem(0)
 
+        shared = {
+            w.package_name
+            for w in working
+            if len([o for o in working if o.package_name == w.package_name]) > 1
+        }
         for package in sorted(missing, key=lambda w: w.name.lower()):
             label = package.package_name
-            if package.renamed:
+            if package.renamed or package.package_name in shared:
+                # The folder is the only thing that tells two worktrees of one
+                # package apart, so it is on the row whenever there are two.
                 label += "  (%s)" % package.name
             item = QListWidgetItem("%s  (not installed)" % label)
             item.setData(_SOURCE_PATH_ROLE, str(package.path))
@@ -1604,7 +1640,7 @@ class MainWindow(QMainWindow):
             # can name the folder it was built from and Re-install knows what
             # to rebuild. Read once for the whole list rather than per row.
             sources = (
-                dev_install.sources_by_package(self.dev_working_root_path())
+                dev_install.sources_for_package(self.dev_working_root_path())
                 if tickable
                 else {}
             )
@@ -1613,8 +1649,12 @@ class MainWindow(QMainWindow):
                 # to the package's name, not to what the resolve makes of it,
                 # and must survive being remarked.
                 display = package.request
-                source = sources.get(package.name)
-                if source is not None and source.renamed:
+                source = dev_install.source_of(
+                    package, sources.get(package.name, ())
+                )
+                if source is not None and (
+                    source.renamed or len(sources.get(package.name, ())) > 1
+                ):
                     # Only when the folder is spelled differently from the
                     # package. Repeating a name the row already carries would
                     # be noise on every other row.

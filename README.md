@@ -386,6 +386,25 @@ two differ, the row names the folder in brackets:
 rig_utils_alembic_properties-0.3.1  (rig_utils-alembic-properties)
 ```
 
+**Several worktrees of one package all stay in the list.** One worktree per
+branch is the normal way to work on more than one at a time, and they all
+declare the same package name — so anything keyed by that name kept whichever
+sorted last. Installing any of them made every other worktree vanish from the
+window, and Re-install became a coin toss between your branches.
+
+Which checkout an install came from is read off the install itself, three ways,
+strongest first: the package directory being a link says it outright; a live
+install's payload links say it too, since they point into the checkout they
+were made from; failing both, a `.bootycall-source` file written at install
+time. When none of those can answer, **no checkout is claimed to be the one** —
+every worktree is listed as installable and Re-install is not offered. A row
+too many is a nuisance; the wrong row is a wrong answer, and so is rebuilding a
+branch you did not mean.
+
+Staleness follows the same rule: an install is compared against the checkout it
+came from, not against a namesake. Editing a different worktree does not put it
+on the update list.
+
 Right-click an installed dev package for **Re-install from &lt;folder&gt;**,
 which rebuilds it from that checkout. Offered only on a single package that
 still has a working copy — a selection would want a progress dialog and a

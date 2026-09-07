@@ -426,9 +426,9 @@ check(
 )
 check(
     "and the two can be looked up by package name",
-    sorted(di.sources_by_package(_pair_work))
+    sorted(di.sources_for_package(_pair_work))
     == ["plain_tool", "rig_utils_alembic_properties"],
-    str(sorted(di.sources_by_package(_pair_work))),
+    str(sorted(di.sources_for_package(_pair_work))),
 )
 
 _pair_dev = _pair / "dev"
@@ -585,6 +585,83 @@ check(
     "and a package with no variants at all is never blocked",
     di.variant_blocker(_pair_work / "plain_tool") == "",
     di.variant_blocker(_pair_work / "plain_tool"),
+)
+
+print("\nseveral worktrees of one package are several packages to manage")
+# One worktree per branch is the normal way to work on more than one at a
+# time, and they all declare the same package name. Keying anything by that
+# name kept whichever sorted last: installing any of them made every other
+# worktree vanish from the window, and Re-install became a coin toss between
+# your branches.
+_wt = Path(tempfile.mkdtemp(prefix="bootycall-worktrees-"))
+_wt_work = _wt / "work"
+for _name in ("rig_utils", "rig_utils-alembic", "rig_utils-fix"):
+    (_wt_work / _name).mkdir(parents=True)
+    (_wt_work / _name / "package.py").write_text(
+        'name = "rig_utils"\nversion = "1.8.666"\n'
+    )
+
+_grouped = di.sources_for_package(_wt_work)
+check(
+    "all three are kept, under the one name they declare",
+    sorted(w.name for w in _grouped["rig_utils"])
+    == ["rig_utils", "rig_utils-alembic", "rig_utils-fix"],
+    str(sorted(w.name for w in _grouped["rig_utils"])),
+)
+
+_wt_dev = _wt / "dev" / "rig_utils" / "1.8.666"
+_wt_dev.mkdir(parents=True)
+(_wt_dev / "package.py").write_text('name = "rig_utils"\nversion = "1.8.666"\n')
+_wt_pkg = lp.LocalPackage(name="rig_utils", version="1.8.666", path=_wt_dev)
+
+check(
+    "with no record of where the install came from, none is claimed",
+    di.installed_source(_wt_dev) is None
+    and di.source_of(_wt_pkg, _grouped["rig_utils"]) is None,
+    str(di.source_of(_wt_pkg, _grouped["rig_utils"])),
+)
+check(
+    "and nothing is called stale on the strength of a guess",
+    di.stale_installs([_wt_pkg], _wt_work) == [],
+    str(di.stale_installs([_wt_pkg], _wt_work)),
+)
+
+di.record_source(_wt_dev, _wt_work / "rig_utils-alembic")
+check(
+    "once recorded, the install names its own checkout",
+    di.installed_source(_wt_dev) == (_wt_work / "rig_utils-alembic").resolve(),
+    str(di.installed_source(_wt_dev)),
+)
+check(
+    "and that is the one it is paired with",
+    di.source_of(_wt_pkg, _grouped["rig_utils"]).name == "rig_utils-alembic",
+    di.source_of(_wt_pkg, _grouped["rig_utils"]).name,
+)
+
+time.sleep(0.02)
+(_wt_work / "rig_utils-fix" / "edited.py").write_text("# a different branch\n")
+check(
+    "editing a different worktree does not make this install stale",
+    di.stale_installs([_wt_pkg], _wt_work) == [],
+    str([str(x.source) for x in di.stale_installs([_wt_pkg], _wt_work)]),
+)
+time.sleep(0.02)
+(_wt_work / "rig_utils-alembic" / "edited.py").write_text("# the one it came from\n")
+_wt_stale = di.stale_installs([_wt_pkg], _wt_work)
+check(
+    "editing the one it came from does",
+    [x.source.name for x in _wt_stale] == ["rig_utils-alembic"],
+    str([str(x.source) for x in _wt_stale]),
+)
+
+# A link says where it came from without needing a marker, and outranks one.
+_wt_link = _wt / "dev" / "linked" / "1.0.0"
+_wt_link.parent.mkdir(parents=True)
+os.symlink(_wt_work / "rig_utils-fix", _wt_link)
+check(
+    "a linked install needs no marker: the link is the record",
+    di.installed_source(_wt_link) == (_wt_work / "rig_utils-fix").resolve(),
+    str(di.installed_source(_wt_link)),
 )
 
 print()

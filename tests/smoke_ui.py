@@ -2465,6 +2465,88 @@ check(
     str(_renamed_rows[0].data(mw_mod._BUILT_FROM_ROLE)),
 )
 
+# Several worktrees of one package -- one per branch -- must all stay in the
+# list. Installing any of them used to make every other one vanish.
+_wt = Path(tempfile.mkdtemp(prefix="bootycall-wt-"))
+_wt_work, _wt_dev = _wt / "work", _wt / "dev"
+for _n in ("rig_utils", "rig_utils-alembic", "rig_utils-fix"):
+    (_wt_work / _n).mkdir(parents=True)
+    (_wt_work / _n / "package.py").write_text(
+        'name = "rig_utils"\nversion = "1.8.666"\n'
+    )
+(_wt_dev / "rig_utils" / "1.8.666").mkdir(parents=True)
+(_wt_dev / "rig_utils" / "1.8.666" / "package.py").write_text(
+    'name = "rig_utils"\nversion = "1.8.666"\n'
+)
+_di.record_source(
+    _wt_dev / "rig_utils" / "1.8.666", _wt_work / "rig_utils-alembic"
+)
+cfg_mod.set_path_overrides(
+    {"dev_root": str(_wt_dev), "dev_working_root": str(_wt_work)}
+)
+window.refresh_package_lists()
+QApplication.processEvents()
+
+_wt_rows = [window.dev_list.item(i) for i in range(window.dev_list.count())]
+_wt_texts = [r.text() for r in _wt_rows]
+check(
+    "the install and both other worktrees are all listed",
+    len(_wt_rows) == 3,
+    str(_wt_texts),
+)
+check(
+    "the installed row names the worktree it actually came from",
+    any(
+        r.data(_NAME_ROLE) == "rig_utils" and "(rig_utils-alembic)" in r.text()
+        for r in _wt_rows
+    ),
+    str(_wt_texts),
+)
+check(
+    "and Re-install would rebuild from that one, not a namesake",
+    any(
+        r.data(mw_mod._BUILT_FROM_ROLE)
+        and Path(r.data(mw_mod._BUILT_FROM_ROLE)).name == "rig_utils-alembic"
+        for r in _wt_rows
+    ),
+    str([r.data(mw_mod._BUILT_FROM_ROLE) for r in _wt_rows]),
+)
+check(
+    "the other two are offered, each named by its folder",
+    sorted(
+        Path(r.data(mw_mod._SOURCE_PATH_ROLE)).name
+        for r in _wt_rows
+        if r.data(mw_mod._SOURCE_PATH_ROLE)
+    )
+    == ["rig_utils", "rig_utils-fix"],
+    str(_wt_texts),
+)
+
+# With no record of where the install came from, no worktree is claimed to be
+# it: a row too many is a nuisance, the wrong row is a wrong answer.
+(_wt_dev / "rig_utils" / "1.8.666" / _di.SOURCE_MARKER).unlink()
+window.refresh_package_lists()
+QApplication.processEvents()
+_wt_rows = [window.dev_list.item(i) for i in range(window.dev_list.count())]
+check(
+    "unknown source: every worktree is listed, none is claimed",
+    len(_wt_rows) == 4
+    and not any(r.data(mw_mod._BUILT_FROM_ROLE) for r in _wt_rows),
+    str([r.text() for r in _wt_rows]),
+)
+
+cfg_mod.set_path_overrides(
+    {"dev_root": str(_installed), "dev_working_root": str(_work)}
+)
+window.refresh_package_lists()
+QApplication.processEvents()
+# Refreshing replaced every row, so the ones captured before it are gone.
+_renamed_rows = [
+    window.dev_list.item(i)
+    for i in range(window.dev_list.count())
+    if "rig_utils" in window.dev_list.item(i).text()
+]
+
 _relabels = []
 
 

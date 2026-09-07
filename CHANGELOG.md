@@ -10,6 +10,32 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.17.0
+
+Minor: several worktrees of one package are several packages to manage.
+
+- **Installing or linking a package no longer hides your other worktrees of
+  it.** One worktree per branch is the normal way to work on more than one at
+  a time, and they all declare the same package name — so anything keyed by
+  that name kept whichever sorted last. Installing any of them made every other
+  worktree disappear from the window.
+
+- **And Re-install was a coin toss between your branches.** The same collapse
+  meant the installed row named an arbitrary namesake as its source, offered to
+  rebuild from it, and the staleness check compared against it. Editing branch
+  A could put branch B's install on the update list, and Re-install could
+  quietly build the wrong one.
+
+- **Which checkout an install came from is now read off the install**, three
+  ways, strongest first: the package directory being a link says it outright; a
+  live install's payload links say it too; failing both, a `.bootycall-source`
+  file written at install time. When none of those can answer, no checkout is
+  claimed — every worktree is listed and Re-install is not offered. A row too
+  many is a nuisance; the wrong row is a wrong answer.
+
+- Rows carry the folder name whenever two worktrees share a package name, since
+  that is the only thing telling them apart.
+
 ## 0.16.1
 
 Patch: the compact window never actually became sticky.

@@ -122,13 +122,76 @@ def list_working_packages(root: Path | str | None = None) -> list[WorkingPackage
     return found
 
 
-def sources_by_package(root: Path | str | None = None) -> dict[str, WorkingPackage]:
-    """Working copies keyed by the package name they declare."""
-    return {
-        p.package_name: p
-        for p in list_working_packages(root)
-        if p.is_package and p.package_name
-    }
+#: Written inside an install, naming the checkout it was built from.
+#:
+#: rez records nothing about where a build came from, and with several
+#: worktrees of one package there is nothing on disk to tell them apart
+#: afterwards. Guessing picked whichever sorted last, which made Re-install a
+#: coin toss between your branches.
+SOURCE_MARKER = ".bootycall-source"
+
+
+def sources_for_package(
+    root: Path | str | None = None,
+) -> dict[str, list[WorkingPackage]]:
+    """Working copies grouped by the package name they declare.
+
+    A list, not one each. Several worktrees of the same package is the normal
+    way to work on more than one branch of it, and they all declare the same
+    name -- so keying by name kept whichever came last and silently dropped the
+    rest from every list and every lookup that used this.
+    """
+    found: dict[str, list[WorkingPackage]] = {}
+    for package in list_working_packages(root):
+        if package.is_package and package.package_name:
+            found.setdefault(package.package_name, []).append(package)
+    return found
+
+
+def record_source(installed: Path | str, source: Path | str) -> None:
+    """Note which checkout an install came from. Best effort."""
+    try:
+        (Path(installed) / SOURCE_MARKER).write_text(
+            str(Path(source).resolve()) + "\n", encoding="utf-8"
+        )
+    except OSError:
+        pass
+
+
+def installed_source(installed: Path | str) -> Path | None:
+    """The checkout an installed package came from, if it can be established.
+
+    Three ways, strongest first. The package directory being a link says it
+    outright. A live install's payload links say it too, since they point into
+    the checkout they were made from. Failing both, the marker this writes at
+    install time.
+
+    ``None`` means genuinely unknown -- an install made before this existed, or
+    by hand -- and callers must treat it as unknown rather than picking a
+    likely-looking worktree.
+    """
+    path = Path(installed)
+    try:
+        if path.is_symlink():
+            return Path(os.path.realpath(path))
+    except OSError:
+        return None
+
+    links = live_links(path)
+    if links:
+        # <install>/<variant>/python -> <checkout>/python, so the checkout is
+        # the target's parent.
+        try:
+            return Path(os.path.dirname(os.path.realpath(links[0])))
+        except OSError:
+            return None
+
+    marker = path / SOURCE_MARKER
+    try:
+        recorded = marker.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return Path(recorded) if recorded else None
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +257,9 @@ def install(source: Path | str, dest_root: Path | str) -> tuple[bool, str]:
     # failure -- the same mistake the symlink path made, one function over.
     for landed in installed_paths(source_path, dest):
         if landed.is_dir():
+            # Which checkout this came from, while it is still known. With
+            # several worktrees of one package nothing on disk says afterwards.
+            record_source(landed, source_path)
             return True, output.strip()
 
     expected = installed_paths(source_path, dest)
@@ -582,6 +648,32 @@ def _duration(seconds: float) -> str:
     return "%d days" % int(seconds // 86400)
 
 
+def source_of(
+    package: LocalPackage, candidates: Sequence[WorkingPackage]
+) -> WorkingPackage | None:
+    """Which of these checkouts this install came from, or ``None``.
+
+    With one candidate the name match is the answer. With several -- worktrees
+    of one package, one per branch -- only what the install itself records
+    counts. Picking a likely one would make "this build is out of date" a claim
+    about a branch you may not have touched.
+    """
+    if not candidates:
+        return None
+
+    recorded = installed_source(package.path)
+    if recorded is not None:
+        for candidate in candidates:
+            try:
+                if candidate.path.resolve() == recorded.resolve():
+                    return candidate
+            except OSError:
+                continue
+        return None
+
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def stale_installs(
     installed: Iterable[LocalPackage], working_root: Path | str | None = None
 ) -> list[StaleInstall]:
@@ -607,7 +699,7 @@ def stale_installs(
     is noise.
     """
     root = Path(working_root) if working_root is not None else dev_working_root()
-    sources = sources_by_package(working_root)
+    sources = sources_for_package(working_root)
     if not sources:
         return []
 
@@ -621,7 +713,7 @@ def stale_installs(
 
     stale: list[StaleInstall] = []
     for name, package in newest.items():
-        source = sources.get(name)
+        source = source_of(package, sources.get(name, ()))
         if source is None or package.path.is_symlink() or is_live(package.path):
             continue
         source_time = newest_mtime(source.path)
