@@ -697,6 +697,81 @@ check(
     str(_dev.live_links(_live / "dev/live/1.0.0/python-3.9")),
 )
 
+print("\nthe copied command and the launch share one environment")
+# Three callers build this: the launch, the resolve probe, and the command you
+# can copy. They drifted once already -- the probe and the launch agreed and
+# the preview did not mention the packages path at all, so what you pasted
+# could not resolve the show package the window had just listed.
+from bootycall.discovery import Project  # noqa: E402
+
+_proj = Project(name="demo", path=Path("/tmp"))
+_saved_env_path = os.environ.get("REZ_PACKAGES_PATH")
+os.environ["REZ_PACKAGES_PATH"] = "/studio/packages"
+launcher._PACKAGES_PATH = None
+
+# A real directory: a root that is not there is not added, since adding one
+# would only slow every resolve down looking in it.
+_show_root = Path(tempfile.mkdtemp(prefix="bootycall-showpkg-")) / ".ilp" / "packages"
+_show_root.mkdir(parents=True)
+_over = launcher.launch_overrides(_proj, (), (str(_show_root),))
+check(
+    "the show's package root is prepended, ahead of the studio path",
+    _over["REZ_PACKAGES_PATH"].split(os.pathsep) == [str(_show_root), "/studio/packages"],
+    _over["REZ_PACKAGES_PATH"],
+)
+check(
+    "and every name a show package might read carries the show",
+    all(_over[v] == "demo" for v in config.SHOW_ENV_VARS),
+    str(_over),
+)
+
+_pv = launcher.rez_preview(("base-6", "show_demo"), "maya", _over)
+check(
+    "the preview carries the same path the launch would set",
+    "REZ_PACKAGES_PATH=%s" % _over["REZ_PACKAGES_PATH"] in _pv,
+    _pv[:200],
+)
+check(
+    "as a prefix bash accepts, in front of the command",
+    _pv.index("REZ_PACKAGES_PATH=") < _pv.index("rez-env"),
+    _pv[:200],
+)
+check(
+    "and it still ends in the request list and the application",
+    _pv.endswith("rez-env base-6 show_demo -- maya"),
+    _pv[-80:],
+)
+
+# It has to be a command a shell will actually take.
+_ran = subprocess.run(
+    ["bash", "-c", _pv.replace("rez-env", "printenv REZ_PACKAGES_PATH #")],
+    capture_output=True,
+    text=True,
+)
+check(
+    "bash parses the whole line, prefix included",
+    _ran.returncode == 0
+    and _ran.stdout.strip() == _over["REZ_PACKAGES_PATH"],
+    (_ran.stderr or _ran.stdout)[:200],
+)
+
+check(
+    "the report's own variable is left out - there is no report in a paste",
+    launcher.APPENDED_ENV
+    not in launcher.rez_preview(
+        ("a-1",),
+        "maya",
+        launcher.launch_overrides(_proj, (), (), appended=("axiom-3.1.0",)),
+    ),
+    "",
+)
+
+if _saved_env_path:
+    os.environ["REZ_PACKAGES_PATH"] = _saved_env_path
+else:
+    os.environ.pop("REZ_PACKAGES_PATH", None)
+launcher._PACKAGES_PATH = None
+
 print("\nand a package this window added says so, in its own colour")
 # The show never asked for it, so it is not the show's environment with a build
 # of yours in it -- it is something else again. The list has to say which.

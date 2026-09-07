@@ -2637,7 +2637,48 @@ check("enabled once there is something to copy", window.copy_action.isEnabled())
 window._on_copy_command()
 QApplication.processEvents()
 _copied = QApplication.clipboard().text()
-check("copying gives the rez command", _copied.startswith("rez-env "), _copied[:80])
+check(
+    "copying gives the rez command",
+    " rez-env " in _copied or _copied.startswith("rez-env "),
+    _copied[:120],
+)
+# A command that cannot resolve the show package is not a preview of anything:
+# that package lives under a root rez has no reason to read, and BootyCall is
+# the only thing that puts it on the path.
+# The packages path is only rewritten when BootyCall can read the current one;
+# with neither REZ_PACKAGES_PATH nor rez-config it leaves the variable alone
+# rather than replacing the site's defaults with a guess. So set one.
+_saved_copy_rez = os.environ.get("REZ_PACKAGES_PATH")
+os.environ["REZ_PACKAGES_PATH"] = "/ice/rez/packages/int"
+launcher._PACKAGES_PATH = None
+window._on_copy_command()
+QApplication.processEvents()
+_copied = QApplication.clipboard().text()
+check(
+    "with the packages path in front of it, so it can actually run",
+    " REZ_PACKAGES_PATH=" in " " + _copied.split(" rez-env ")[0],
+    _copied[:240],
+)
+check(
+    "carrying the show's own package root, which rez reads nowhere else",
+    "batman_returns/.ilp/packages" in _copied.split(" rez-env ")[0],
+    _copied[:240],
+)
+if _saved_copy_rez:
+    os.environ["REZ_PACKAGES_PATH"] = _saved_copy_rez
+else:
+    os.environ.pop("REZ_PACKAGES_PATH", None)
+launcher._PACKAGES_PATH = None
+check(
+    "and the show name, which a show package's commands() may read",
+    "ILP_CONTEXT_SHOW=batman_returns" in _copied,
+    _copied[:200],
+)
+check(
+    "but not the variable that only feeds the launch report",
+    launcher.APPENDED_ENV not in _copied,
+    _copied[:200],
+)
 check(
     "with every request and the application in it",
     all(r in _copied for r in window.resolved_packages())

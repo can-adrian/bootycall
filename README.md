@@ -1166,12 +1166,33 @@ Both commands run with the show folder as cwd, which is what a bootstrap's
 `__file__`-relative lookups and anything the DCC opens by relative path both
 expect.
 
-**Edit → Copy launch command** puts the rez invocation alone on the clipboard —
-`rez-env base-6 nuke-16.0 … -- nuke` — ready to paste into a shell. Not the
-terminal wrapper, not the `cd`, not the reporting preamble: those are how
-BootyCall runs it, and none of them are what you want in your hand when you are
-about to run the same resolve yourself. It is also side-effect free, where the
-full argv writes a launch script to disk to get a path to point rez at.
+**Edit → Copy launch command** puts the rez invocation, and the environment it
+needs, on the clipboard:
+
+```
+REZ_PACKAGES_PATH=/ice/.../local/adts/dev:/ice/.../local/adts:/ice/shows/batman_returns/.ilp/packages:/ice/rez/packages/int \
+ILP_SHOW=batman_returns ILP_CONTEXT_SHOW=batman_returns SHOW=batman_returns \
+rez-env base-6 nuke-16.0 … show_batman_returns -- nuke
+```
+
+Not the terminal wrapper, not the `cd`, not the reporting preamble: those are
+how BootyCall runs it, and none of them are what you want in your hand when you
+are about to run the same resolve yourself. The environment is a different
+matter — it is the difference between a command that runs and one that does
+not. Without the packages path the show package is on no root rez reads, and a
+show whose own package reads the show name out of the environment fails with
+`PackageCommandError` on top of that.
+
+`BOOTYCALL_APPENDED` is left out: it feeds the launch report, and there is no
+report in a paste. What it named is already in the request list.
+
+The launch, the resolve probe and this preview all build that environment with
+one function, so the command you copy is the one that runs. They drifted once:
+the first two agreed and the preview mentioned no packages path at all, so what
+you pasted could not resolve the show package the window had just listed.
+
+It is also side-effect free, where the full argv writes a launch script to disk
+to get a path to point rez at.
 
 `BOOTSTRAP_GLOBS` is also a guess, derived from the three `os.path.dirname()`
 calls in `_get_show_packages()` — that puts the bootstrap three levels below the

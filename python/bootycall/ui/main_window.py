@@ -2435,14 +2435,29 @@ class MainWindow(QMainWindow):
         tool = self._current_tool()
         if project is None or tool is None or self._active_dcc is None:
             return
-        # The rez command alone. The terminal wrapper, the cd and the
-        # reporting preamble are how BootyCall runs it, and pasting a screen of
-        # those into a shell to re-run one resolve helps nobody.
+        # The rez command and the environment it needs, and nothing else. The
+        # terminal wrapper, the cd and the reporting preamble are how BootyCall
+        # runs it; pasting a screen of those into a shell helps nobody. The
+        # environment is not optional though -- without the packages path the
+        # show package is on no root rez reads, and the command fails.
         preview = launcher.rez_preview(
-            self.resolved_packages(), self._active_dcc.run_command
+            self.resolved_packages(),
+            self._active_dcc.run_command,
+            launcher.launch_overrides(
+                project, self.excluded_roots(), self.included_roots()
+            ),
         )
         QApplication.clipboard().setText(preview)
-        self.statusBar().showMessage("Copied: %s" % preview, 5000)
+        self.statusBar().showMessage(
+            "Copied the launch command (%d packages, %d environment settings)"
+            % (
+                len(self.resolved_packages()),
+                len(launcher.launch_overrides(
+                    project, self.excluded_roots(), self.included_roots()
+                )),
+            ),
+            6000,
+        )
 
     # -- resolving, launching, terminal -------------------------------------
 

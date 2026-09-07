@@ -151,6 +151,44 @@ def _rez_env_key(name: str) -> str:
     return cleaned.upper()
 
 
+def launch_overrides(
+    project: Project,
+    exclude_roots: Sequence[str] = (),
+    include_roots: Sequence[str] = (),
+    appended: Sequence[str] = (),
+) -> dict[str, str]:
+    """Everything a launch changes about the environment before running rez.
+
+    One function because there are three callers -- the launch, the resolve
+    probe, and the command you can copy -- and the whole value of the copied
+    command is that it is the same thing. Three copies of this drifted apart
+    once already: the probe and the launch agreed, and the preview did not
+    mention the packages path at all, so the command you pasted could not
+    resolve the show package.
+
+    Two reasons to rewrite the packages path. Switching off a package section
+    means its packages must not reach the resolve, and they are not in the
+    request -- they arrive through the path. And a show package lives under a
+    root rez has no reason to know about, so requesting it without adding that
+    root would fail to resolve.
+    """
+    # A show package's commands() runs during the resolve and may read the show
+    # out of the environment, expecting the bootstrap to have put it there. We
+    # went straight to rez, so it has to come from here -- and a show whose
+    # package reads a name nobody set fails the whole resolve with
+    # PackageCommandError, naming the variable.
+    overrides = dict(config.show_env(project.name))
+    if appended:
+        overrides[APPENDED_ENV] = " ".join(
+            _rez_env_key(request_name(r)).lower() for r in appended
+        )
+
+    paths, _note = filtered_packages_path(exclude_roots, include_roots)
+    if paths:
+        overrides["REZ_PACKAGES_PATH"] = os.pathsep.join(paths)
+    return overrides
+
+
 def resolve_probe(
     project: Project,
     packages: Sequence[str],
@@ -173,10 +211,7 @@ def resolve_probe(
     whose columns move between versions.
     """
     argv = ["rez-env", *packages, "--", "printenv"]
-    overrides = dict(config.show_env(project.name))
-    paths, _note = filtered_packages_path(exclude_roots, include_roots)
-    if paths:
-        overrides["REZ_PACKAGES_PATH"] = os.pathsep.join(paths)
+    overrides = launch_overrides(project, exclude_roots, include_roots)
 
     env = os.environ.copy()
     env.update(overrides)
@@ -671,21 +706,41 @@ def _preview(project: Project, argv: Sequence[str]) -> str:
     )
 
 
-def rez_preview(packages: Sequence[str], command: str = "") -> str:
-    """Just the rez invocation, ready to paste into a shell.
+def rez_preview(
+    packages: Sequence[str],
+    command: str = "",
+    overrides: dict[str, str] | None = None,
+) -> str:
+    """The rez invocation and the environment it needs, ready to paste.
 
     Not the terminal wrapper, not the ``cd``, not the reporting preamble: those
     are how BootyCall runs it, and none of them are what you want in your hand
     when you are about to run the same resolve yourself.
 
-    ``show_info=False`` also keeps this side-effect free. The full argv writes a
+    The environment is a different matter. Without ``REZ_PACKAGES_PATH`` the
+    show package is not on any root rez reads, so the pasted command fails to
+    resolve something the window said was there -- and a show whose package
+    reads the show name out of the environment fails with
+    ``PackageCommandError`` on top of that. A command that does not run is not
+    a preview of anything.
+
+    :data:`APPENDED_ENV` is left out: it feeds the launch report, and there is
+    no report here. What it named is already in the request list.
+
+    ``show_info=False`` keeps this side-effect free. The full argv writes a
     launch script to disk to get a path to point rez at, and building a preview
     is not a reason to write a file.
     """
-    return " ".join(
+    argv = " ".join(
         shlex.quote(part)
         for part in rez_argv(packages, command, show_info=False)
     )
+    prefix = " ".join(
+        "%s=%s" % (key, shlex.quote(value))
+        for key, value in sorted((overrides or {}).items())
+        if value and key != APPENDED_ENV
+    )
+    return "%s %s" % (prefix, argv) if prefix else argv
 
 
 def command_preview(
@@ -775,22 +830,8 @@ def _spawn(
         return None
 
     env = os.environ.copy()
-    # A show package's commands() runs during the resolve and may read the show
-    # out of the environment, expecting the bootstrap to have put it there. We
-    # went straight to rez, so it has to come from here -- and a show whose
-    # package reads a name nobody set fails the whole resolve with
-    # PackageCommandError, naming the variable.
-    env.update(config.show_env(project.name))
-    env[APPENDED_ENV] = " ".join(_rez_env_key(request_name(r)).lower() for r in appended)
-
-    # Two reasons to rewrite the path. Switching off a package section means
-    # its packages must not reach the resolve, and they are not in the request
-    # -- they arrive through the packages path. And a show package lives under
-    # a root rez has no reason to know about, so requesting it without adding
-    # that root would fail to resolve.
-    paths, _note = filtered_packages_path(exclude_roots, include_roots)
-    if paths:
-        env["REZ_PACKAGES_PATH"] = os.pathsep.join(paths)
+    env[APPENDED_ENV] = ""  # cleared, so an inherited one cannot leak in
+    env.update(launch_overrides(project, exclude_roots, include_roots, appended))
 
     kwargs: dict = {
         # The show folder as cwd: a bootstrap's __file__-relative lookups and

@@ -10,6 +10,35 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.16.0
+
+Minor: the copied command carries the environment it needs.
+
+- **Copy launch command now includes the environment prefix**, so what you
+  paste is a command that runs:
+
+  ```
+  REZ_PACKAGES_PATH=…/dev:…/local:…/batman_returns/.ilp/packages:/ice/rez/packages/int \
+  ILP_SHOW=batman_returns ILP_CONTEXT_SHOW=batman_returns SHOW=batman_returns \
+  rez-env base-6 nuke-16.0 … show_batman_returns -- nuke
+  ```
+
+  Without the packages path the show package is on no root rez reads — that
+  root is one BootyCall adds and rez has no reason to know about — so the
+  command failed to resolve a package the window had just listed. A show whose
+  own package reads the show name out of the environment failed with
+  `PackageCommandError` on top of it.
+
+  `BOOTYCALL_APPENDED` is left out: it feeds the launch report, and there is no
+  report in a paste. What it named is already in the request list.
+
+- **One function builds that environment now.** There were three copies — the
+  launch, the resolve probe and the preview — and they had already drifted: the
+  first two agreed, and the preview did not mention the packages path at all.
+  A copied command that differs from the launch is worth less than no copied
+  command, so the three share `launch_overrides()` and a test asserts the
+  preview carries exactly what the launch would set.
+
 ## 0.15.3
 
 Patch: you can see the checkboxes now.
