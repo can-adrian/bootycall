@@ -10,6 +10,26 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.16.1
+
+Patch: the compact window never actually became sticky.
+
+- **The window id was passed to `wmctrl` in decimal.** `wmctrl -i` parses its
+  argument as base 16, so it was read as a different — usually nonexistent —
+  window. wmctrl does not check that the window exists before sending its
+  ClientMessage, so it exited zero regardless. Installed, ran, reported
+  success, did nothing, and left no note. It goes as `0x…` now, which wmctrl,
+  xdotool and xprop all read the same way.
+
+- **And the exit code is no longer taken as the answer.** After running a
+  helper BootyCall asks X — `xprop -id <win> _NET_WM_STATE` — whether the
+  window came out sticky, and moves on to the next helper if it did not. No
+  `xprop` is "cannot tell", not failure: reporting a working setup as broken
+  would be the same mistake in the other direction.
+
+  A helper that ran and did not work now says so on the compact toggle's
+  tooltip, where it used to say nothing at all.
+
 ## 0.16.0
 
 Minor: the copied command carries the environment it needs.

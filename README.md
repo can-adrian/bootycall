@@ -900,6 +900,18 @@ expand — a full-size window that refuses to go behind anything is a nuisance.
   window, and the toggle's tooltip says what was skipped. Wayland has no
   equivalent by design; macOS and Windows manage this themselves.
 
+  The window id goes to those helpers as **hex**. `wmctrl -i` parses its
+  argument as base 16, so a decimal id was read as a different, usually
+  nonexistent window — and wmctrl does not check that the window exists, so it
+  exited zero anyway. Installed, ran, reported success, did nothing, said
+  nothing.
+
+  And the exit code is not the answer either: after running a helper BootyCall
+  asks X, with `xprop -id <win> _NET_WM_STATE`, whether the window actually
+  came out sticky. No `xprop` means no way to check, which is reported as
+  "cannot tell" rather than as failure. A helper that ran and did not work now
+  says so on the toggle's tooltip instead of passing silently.
+
 ## One instance per user
 
 A second launch doesn't open a second window — it raises the running one, which

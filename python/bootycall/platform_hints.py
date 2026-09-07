@@ -61,23 +61,78 @@ def set_visible_on_all_workspaces(window, enabled: bool) -> str:
     except (TypeError, ValueError):
         return "no native window id yet"
 
+    tried = []
     for command in _sticky_commands(win_id, enabled):
         if shutil.which(command[0]) is None:
             continue
-        try:
-            result = subprocess.run(  # noqa: S603
-                command,
-                timeout=_TIMEOUT,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError):
+        tried.append(command[0])
+        if not _run(command):
             continue
-        if result.returncode == 0:
+        # Exit zero is the helper's opinion. wmctrl sends a ClientMessage to
+        # whatever window id it was given and reports success without checking
+        # that the id exists, let alone that the window manager acted on it --
+        # so the one run that mattered was the one nobody verified. Ask X.
+        state = sticky_state(win_id)
+        if state is None or state is enabled:
             return ""
 
-    return "install wmctrl or xdotool to pin the compact window to all workspaces"
+    if not tried:
+        return "install wmctrl or xdotool to pin the compact window to all workspaces"
+    return (
+        "%s ran but the window manager did not make the window sticky"
+        % " and ".join(tried)
+    )
+
+
+def _run(command: list[str]) -> bool:
+    try:
+        result = subprocess.run(  # noqa: S603
+            command,
+            timeout=_TIMEOUT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
+def sticky_state(win_id: int) -> bool | None:
+    """Is the window sticky according to X? ``None`` when it cannot be asked.
+
+    ``None`` is not "no": without ``xprop`` there is no way to check, and
+    treating that as failure would report a working setup as broken.
+    """
+    if shutil.which("xprop") is None:
+        return None
+    try:
+        result = subprocess.run(  # noqa: S603
+            ["xprop", "-id", window_arg(win_id), "_NET_WM_STATE"],
+            timeout=_TIMEOUT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return "_NET_WM_STATE_STICKY" in result.stdout
+
+
+def window_arg(win_id: int) -> str:
+    """A window id these helpers will read as the number we meant.
+
+    Hex, with the ``0x``. ``wmctrl -i`` parses its argument as base 16, so a
+    decimal id was silently read as a different, usually nonexistent window --
+    and because wmctrl does not check that the window exists, it then exited
+    zero. Installed, ran, reported success, did nothing.
+
+    ``0x``-prefixed is unambiguous to every one of these: wmctrl, xdotool and
+    xprop all take it.
+    """
+    return "0x%08x" % win_id
 
 
 def _sticky_commands(win_id: int, enabled: bool) -> list[list[str]]:
@@ -86,6 +141,6 @@ def _sticky_commands(win_id: int, enabled: bool) -> list[list[str]]:
     # 0xFFFFFFFF is "all desktops" in the EWMH spec; -1 is xdotool's spelling.
     desktop = "-1" if enabled else "0"
     return [
-        ["wmctrl", "-i", "-r", str(win_id), "-b", "%s,sticky" % action],
-        ["xdotool", "set_desktop_for_window", str(win_id), desktop],
+        ["wmctrl", "-i", "-r", window_arg(win_id), "-b", "%s,sticky" % action],
+        ["xdotool", "set_desktop_for_window", window_arg(win_id), desktop],
     ]

@@ -1306,6 +1306,38 @@ check(
 check("and reports rather than raising", isinstance(note, str))
 check("x11 detection", platform_hints.is_x11() is False)
 
+# wmctrl -i parses its window argument as base 16. A decimal id was read as a
+# different, usually nonexistent window -- and because wmctrl does not check
+# that the window exists, it exited zero anyway. Installed, ran, reported
+# success, did nothing, and said nothing.
+check(
+    "the window id goes to the helpers as hex, which all of them read",
+    platform_hints.window_arg(54525955) == "0x03400003",
+    platform_hints.window_arg(54525955),
+)
+_cmds = platform_hints._sticky_commands(54525955, True)
+check(
+    "so wmctrl is asked about the window we meant",
+    _cmds[0] == ["wmctrl", "-i", "-r", "0x03400003", "-b", "add,sticky"],
+    str(_cmds[0]),
+)
+check(
+    "and xdotool too, which takes the same spelling",
+    _cmds[1] == ["xdotool", "set_desktop_for_window", "0x03400003", "-1"],
+    str(_cmds[1]),
+)
+check(
+    "collapsing back is the same id, the other way round",
+    platform_hints._sticky_commands(54525955, False)[0][-1] == "remove,sticky",
+    str(platform_hints._sticky_commands(54525955, False)[0]),
+)
+check(
+    "without xprop there is no way to check, which is not the same as failure",
+    platform_hints.sticky_state(54525955) is None
+    or isinstance(platform_hints.sticky_state(54525955), bool),
+    str(platform_hints.sticky_state(54525955)),
+)
+
 print("\nonly one instance at a time")
 from bootycall.single_instance import SingleInstance  # noqa: E402
 
