@@ -473,6 +473,109 @@ check(
     str(config.show_env("diner_bear_s3")),
 )
 
+print("\nediting the version a checkout declares")
+# Only the string literal's own characters are replaced. A definition is
+# somebody's source file, and reformatting it would be a change they did not
+# ask for.
+_ver = Path(tempfile.mkdtemp(prefix="bootycall-setver-"))
+_ver_src = (
+    "# rig_utils - alembic property support\n"
+    'name = "rig_utils"\n'
+    "\n"
+    'version = "1.3.9"   # bump me before release\n'
+    "\n"
+    'requires = ["python-3.9+"]\n'
+)
+(_ver / "package.py").write_text(_ver_src)
+
+check("a plain bump works", lp.set_version(_ver, "1.4.0") == "", lp.set_version(_ver, "1.4.0"))
+_after = (_ver / "package.py").read_text()
+check(
+    "and only that one line moved",
+    [
+        i
+        for i, (a, b) in enumerate(zip(_ver_src.splitlines(), _after.splitlines()))
+        if a != b
+    ]
+    == [3],
+    _after,
+)
+check(
+    "the comment beside it survives",
+    "# bump me before release" in _after,
+    _after,
+)
+check("the file still parses", lp.definition_fields(_ver).get("version") == "1.4.0")
+
+check(
+    "a version that changed underneath is not written over",
+    "changed since this was opened" in lp.set_version(_ver, "2.0.0", expect_current="1.3.9"),
+    lp.set_version(_ver, "2.0.0", expect_current="1.3.9"),
+)
+check(
+    "and the file is untouched by the refusal",
+    lp.definition_fields(_ver).get("version") == "1.4.0",
+)
+
+check("empty is refused", "cannot be empty" in lp.set_version(_ver, "  "))
+check(
+    "so is anything rez would not read as a version",
+    "letters, digits" in lp.set_version(_ver, "1.4 0"),
+    lp.set_version(_ver, "1.4 0"),
+)
+check(
+    "a quote cannot be smuggled in to break the file",
+    lp.set_version(_ver, '1.0"; import os') != "",
+)
+
+_built = _ver / "computed"
+_built.mkdir()
+(_built / "package.py").write_text('name = "x"\nversion = get_version()\n')
+check(
+    "a version built by code has nothing to replace, and says so",
+    "builds its version" in lp.set_version(_built, "2.0.0"),
+    lp.set_version(_built, "2.0.0"),
+)
+
+_none = _ver / "noversion"
+_none.mkdir()
+(_none / "package.py").write_text('name = "x"\n')
+check(
+    "so does one with no version at all",
+    "does not set a version" in lp.set_version(_none, "2.0.0"),
+    lp.set_version(_none, "2.0.0"),
+)
+
+_yaml = _ver / "yamlpkg"
+_yaml.mkdir()
+(_yaml / "package.yaml").write_text("name: x\nversion: 1.0.0\n")
+check(
+    "and YAML is read here with a regex, which is no way to write one",
+    "YAML" in lp.set_version(_yaml, "2.0.0"),
+    lp.set_version(_yaml, "2.0.0"),
+)
+
+_broken = _ver / "broken"
+_broken.mkdir()
+(_broken / "package.py").write_text('name = "x"\nversion = "1.0.0"\nrequires = [\n')
+check(
+    "a definition that does not parse is left alone",
+    "does not parse" in lp.set_version(_broken, "2.0.0"),
+    lp.set_version(_broken, "2.0.0"),
+)
+
+# Single quotes are somebody's house style, and swapping them would be a
+# change nobody asked for.
+_single = _ver / "single"
+_single.mkdir()
+(_single / "package.py").write_text("name = 'x'\nversion = '1.0.0'\n")
+lp.set_version(_single, "1.1.0")
+check(
+    "the quote style is whatever the file already used",
+    "version = '1.1.0'" in (_single / "package.py").read_text(),
+    (_single / "package.py").read_text(),
+)
+
 print()
 if failures:
     print("%d FAILED: %s" % (len(failures), ", ".join(failures)))

@@ -10,6 +10,34 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.20.0
+
+Minor: edit a checkout's version, and turn a link back into a build.
+
+- **Set version…** on an uninstalled row rewrites `version` in that checkout's
+  `package.py`. Only the string literal's own characters are replaced — `ast`
+  gives its line and column span — so comments, blank lines and quote style
+  come out byte-identical.
+
+  Offered on checkouts only. An installed package's definition is build output
+  and a linked one is read through the link; changing either would make the
+  declared version stop matching the directory it sits in, which is the
+  mismatch the list already flags in red.
+
+  Refused rather than guessed at: a version built by code, a definition with no
+  version, YAML, one that does not parse, and a file that changed since the
+  prompt opened — these are working copies, usually open in an editor.
+
+- **Replace link with an install** on a linked or live install: the link comes
+  out and the checkout it pointed at is built in its place. Removed first, then
+  built — a live install's payload *is* links into the checkout, so a build run
+  over the top would write through them into your working copy.
+
+- A link now stands as its own source. `Re-install from …` needed a match in
+  the configured working location, so a package linked from anywhere else was
+  offered nothing — even though the link says exactly where it came from, which
+  is the stronger evidence of the two.
+
 ## 0.19.1
 
 Patch: an uninstalled row leads with its folder.

@@ -409,6 +409,106 @@ def definition_fields(path: Path | str) -> dict[str, str]:
     return found
 
 
+#: What a rez version may be spelled with. Deliberately permissive -- rez is --
+#: but not permissive enough to let a quote or a newline into the file.
+VERSION_CHARS = re.compile(r"^[A-Za-z0-9._+-]+$")
+
+
+def set_version(
+    path: Path | str, new_version: str, expect_current: str = ""
+) -> str:
+    """Rewrite ``version`` in a package definition. Returns "" or why it did not.
+
+    Only the string literal's own characters are replaced -- ``ast`` gives its
+    line and column span, so comments, blank lines, quote style and the rest of
+    the file come out byte-identical. A definition is somebody's source file
+    and reformatting it would be a change they did not ask for.
+
+    Refused, rather than guessed at, in four cases:
+
+    * the version is not a plain string literal (``version = get_version()``
+      is common enough, and there is nothing to replace);
+    * there is no ``version`` at all;
+    * the definition is YAML, which is read here with a regex -- fine for
+      reading, not fine for writing;
+    * the file no longer says what the caller was shown. These are working
+      copies, usually open in an editor, and writing over somebody's edit
+      because a dialog was left open is worse than not writing at all.
+    """
+    text = str(new_version).strip()
+    if not text:
+        return "a version cannot be empty"
+    if not VERSION_CHARS.match(text):
+        return (
+            "%r is not something rez will read as a version - letters, digits, "
+            "and . _ + - only" % text
+        )
+
+    definition = Path(path)
+    if definition.is_dir():
+        found = _definition_in(definition)
+        if not found:
+            return "%s has no package definition in it" % definition
+        definition = definition / found
+    if definition.suffix in (".yaml", ".yml"):
+        return (
+            "%s is YAML. BootyCall reads those with a regex, which is fine for "
+            "reading and not fine for writing - edit it by hand."
+            % definition.name
+        )
+
+    try:
+        source = definition.read_text(encoding="utf-8")
+    except OSError as exc:
+        return "cannot read %s: %s" % (definition, exc)
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as exc:
+        return "%s does not parse: %s" % (definition.name, exc)
+
+    node = None
+    for statement in tree.body:
+        if isinstance(statement, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "version" for t in statement.targets
+        ):
+            node = statement.value
+    if node is None:
+        return "%s does not set a version" % definition.name
+    if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+        return (
+            "%s builds its version rather than writing it out, so there is "
+            "nothing here to replace" % definition.name
+        )
+    if expect_current and node.value != expect_current:
+        return (
+            "%s now says %s, not %s - it changed since this was opened, so "
+            "nothing was written" % (definition.name, node.value, expect_current)
+        )
+    if node.value == text:
+        return ""
+
+    lines = source.splitlines(keepends=True)
+    line = lines[node.lineno - 1]
+    quote = line[node.col_offset]
+    lines[node.lineno - 1] = (
+        line[: node.col_offset]
+        + quote
+        + text
+        + quote
+        + line[node.end_col_offset :]
+    )
+    try:
+        definition.write_text("".join(lines), encoding="utf-8")
+    except OSError as exc:
+        return "cannot write %s: %s" % (definition, exc)
+
+    # What it says now, not what we meant it to say.
+    written = definition_fields(definition).get("version", "")
+    if written != text:
+        return "wrote %s but it now reads %r" % (text, written)
+    return ""
+
+
 def definition_variants(path: Path | str) -> tuple[tuple[str, ...], ...]:
     """The ``variants`` a package definition declares, read statically.
 

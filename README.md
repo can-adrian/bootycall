@@ -441,6 +441,43 @@ Staleness follows the same rule: an install is compared against the checkout it
 came from, not against a namesake. Editing a different worktree does not put it
 on the update list.
 
+#### Changing the version a checkout declares
+
+Right-click an uninstalled row for **Set version…**. It rewrites `version` in
+that checkout's `package.py` — and only the string literal's own characters,
+because `ast` gives its exact line and column span. Comments, blank lines and
+quote style come out byte-identical; a definition is somebody's source file and
+reformatting it would be a change nobody asked for.
+
+**Offered on checkouts only.** An installed package's definition is build
+output, and a linked one is read *through* the link — change either and the
+version it declares stops matching the directory it sits in, which is the
+mismatch this list flags in red as *rez will skip this*. A checkout is the one
+of the three that is source.
+
+Refused rather than guessed at: a version built by code rather than written out
+(`version = get_version()`), a definition with no version, a YAML package (read
+here with a regex, which is fine for reading and not for writing), one that does
+not parse, and — the one that matters most — **a file that has changed since the
+dialog opened**. These are working copies, usually open in an editor, and
+writing over somebody's edit because a prompt was left open is worse than not
+writing at all.
+
+If the checkout is already installed, bumping its version means the next install
+makes a *new* version directory rather than replacing the old one. Usually what
+you want; worth knowing when it is not.
+
+#### Turning a link back into a build
+
+A linked or live install offers **Replace link with an install**: the link comes
+out, and the checkout it pointed at is built in its place. Removed first and
+built second, deliberately — a live install's payload *is* links into the
+checkout, and running a build over the top of those would have it writing
+through them into your working copy.
+
+The working copy is untouched either way: removing a link removes the link.
+Edits there stop being live in the next resolve, which is the point of doing it.
+
 Right-click an installed dev package for **Re-install from &lt;folder&gt;**,
 which rebuilds it from that checkout. Offered only on a single package that
 still has a working copy — a selection would want a progress dialog and a

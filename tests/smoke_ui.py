@@ -3657,6 +3657,126 @@ if _have_links:
     window.refresh_package_lists()
     QApplication.processEvents()
 
+print("\nediting a version is offered where the file is somebody's source")
+_edit = Path(tempfile.mkdtemp(prefix="bootycall-edit-"))
+_edit_work, _edit_dev = _edit / "work", _edit / "dev"
+(_edit_work / "rig_utils-alembic").mkdir(parents=True)
+(_edit_work / "rig_utils-alembic" / "package.py").write_text(
+    'name = "rig_utils"\nversion = "1.3.9"\n'
+)
+(_edit_dev / "built" / "2.0.0").mkdir(parents=True)
+(_edit_dev / "built" / "2.0.0" / "package.py").write_text(
+    'name = "built"\nversion = "2.0.0"\n'
+)
+_edit_link_src = _edit / "linksrc"
+_edit_link_src.mkdir()
+(_edit_link_src / "package.py").write_text('name = "linked"\nversion = "3.0.0"\n')
+(_edit_dev / "linked").mkdir(parents=True)
+os.symlink(_edit_link_src, _edit_dev / "linked" / "3.0.0")
+
+cfg_mod.set_path_overrides(
+    {"dev_root": str(_edit_dev), "dev_working_root": str(_edit_work)}
+)
+window.refresh_package_lists()
+QApplication.processEvents()
+
+_edit_labels = []
+
+
+class _EditMenu:
+    def __init__(self, *a, **k):
+        pass
+
+    def addAction(self, label):
+        _edit_labels.append(label)
+        return label
+
+    def addSeparator(self):
+        pass
+
+    def exec(self, *a):
+        return None
+
+
+def _menu_for(match):
+    _edit_labels.clear()
+    row = next(
+        window.dev_list.item(i)
+        for i in range(window.dev_list.count())
+        if match in window.dev_list.item(i).text()
+    )
+    window.dev_list.setCurrentItem(row)
+    real = mw_mod.QMenu
+    mw_mod.QMenu = _EditMenu
+    try:
+        window._on_package_menu(
+            window.dev_list, window.dev_list.visualItemRect(row).center()
+        )
+    finally:
+        mw_mod.QMenu = real
+    return list(_edit_labels)
+
+
+_checkout_menu = _menu_for("rig_utils-alembic")
+check(
+    "a checkout offers it - that file is source",
+    "Set version..." in _checkout_menu,
+    str(_checkout_menu),
+)
+_built_menu = _menu_for("built-2.0.0")
+check(
+    "an installed package does not - its definition is build output, and the "
+    "version it declares would stop matching the directory it sits in",
+    "Set version..." not in _built_menu,
+    str(_built_menu),
+)
+_linked_menu = _menu_for("linked-3.0.0")
+check(
+    "nor a linked one, which is read through the link",
+    "Set version..." not in _linked_menu,
+    str(_linked_menu),
+)
+check(
+    "but a linked one can be swapped for a build",
+    "Replace link with an install" in _linked_menu,
+    str(_linked_menu),
+)
+check(
+    "which a plain install is not offered, having no link to replace",
+    not any(l.startswith("Replace") for l in _built_menu),
+    str(_built_menu),
+)
+
+# The edit itself, with the prompt answered for us.
+_real_input = mw_mod.QInputDialog.getText
+mw_mod.QInputDialog.getText = staticmethod(lambda *a, **k: ("1.4.0", True))
+try:
+    window._set_version(str(_edit_work / "rig_utils-alembic"))
+finally:
+    mw_mod.QInputDialog.getText = _real_input
+check(
+    "the file says what was typed",
+    'version = "1.4.0"'
+    in (_edit_work / "rig_utils-alembic" / "package.py").read_text(),
+    (_edit_work / "rig_utils-alembic" / "package.py").read_text(),
+)
+cfg_mod.set_path_overrides(
+    {"dev_root": str(_edit_dev), "dev_working_root": str(_edit_work)}
+)
+window.refresh_package_lists()
+QApplication.processEvents()
+check(
+    "and the row followed it",
+    any(
+        "(rig_utils-1.4.0)" in window.dev_list.item(i).text()
+        for i in range(window.dev_list.count())
+    ),
+    str([window.dev_list.item(i).text() for i in range(window.dev_list.count())]),
+)
+cfg_mod.set_path_overrides({})
+window.refresh_package_lists()
+QApplication.processEvents()
+
 print("\nright-clicking a section header opens what it is a view of")
 pin("batman_returns")
 _hdr_work = Path(tempfile.mkdtemp(prefix="bootycall-hdrwork-"))

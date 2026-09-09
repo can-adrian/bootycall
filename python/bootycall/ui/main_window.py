@@ -54,6 +54,7 @@ from ..local_packages import (
     LocalPackage,
     LocalPackagesUnavailable,
     current_user,
+    definition_fields,
     definition_mismatch,
     delete_package,
     dev_root,
@@ -62,6 +63,7 @@ from ..local_packages import (
     local_root,
     request_name,
     resolves_to,
+    set_version,
     shadowed_requests,
     version_key,
 )
@@ -1666,6 +1668,15 @@ class MainWindow(QMainWindow):
                 source = dev_install.source_of(
                     package, sources.get(package.name, ())
                 )
+                # A link says where it came from whether or not that is inside
+                # the configured working location -- people link from wherever
+                # the checkout happens to be. The link is the stronger evidence
+                # of the two, so it stands in when no candidate matched.
+                built_from = (
+                    source.path
+                    if source is not None
+                    else dev_install.installed_source(package.path)
+                )
                 if source is not None and (
                     source.renamed or len(sources.get(package.name, ())) > 1
                 ):
@@ -1683,8 +1694,8 @@ class MainWindow(QMainWindow):
                 item = QListWidgetItem(display)
                 item.setData(_PACKAGE_NAME_ROLE, package.name)
                 item.setData(_PACKAGE_PATH_ROLE, str(package.path))
-                if source is not None:
-                    item.setData(_BUILT_FROM_ROLE, str(source.path))
+                if built_from is not None and Path(built_from).is_dir():
+                    item.setData(_BUILT_FROM_ROLE, str(built_from))
 
                 # A package rez will skip is worth flagging before anything
                 # else this list says about it: an override that rez never
@@ -1979,7 +1990,20 @@ class MainWindow(QMainWindow):
             else None
         )
         rebuild_action = None
+        replace_action = None
         if rebuild_from:
+            one = packages[0]
+            linked = one.is_symlink or dev_install.is_live(one.path)
+            if linked:
+                # A link is the fast way to work and the wrong thing to leave
+                # behind: nothing is built, so a package whose payload a build
+                # produces is incomplete, and a broken save is live in every
+                # DCC you launch. Swapping it for a build is the end of that,
+                # and doing it by hand is two steps with a delete in the middle.
+                replace_action = menu.addAction(
+                    "Replace %s with an install"
+                    % ("link" if one.is_symlink else "live links")
+                )
             rebuild_action = menu.addAction(
                 "Re-install from %s" % Path(rebuild_from).name
             )
@@ -2001,7 +2025,9 @@ class MainWindow(QMainWindow):
         )
 
         chosen = menu.exec(listing.mapToGlobal(point))
-        if rebuild_action is not None and chosen is rebuild_action:
+        if replace_action is not None and chosen is replace_action:
+            self._replace_link(listing, packages[0], rebuild_from)
+        elif rebuild_action is not None and chosen is rebuild_action:
             self._build_from(rebuild_from, link=False, verb="Re-install")
         elif chosen is browse_action:
             self.browse_packages(packages)
@@ -2015,6 +2041,65 @@ class MainWindow(QMainWindow):
         elif chosen is delete_action:
             self._confirm_delete_packages(listing, packages)
 
+    def _replace_link(
+        self, listing: QListWidget, package: LocalPackage, source: str
+    ) -> None:
+        """Take the link out and build the checkout in its place.
+
+        Removed first, then built. A live install's payload *is* links into the
+        checkout, and running a build over the top of those would have it
+        writing through them into your working copy -- so the installed package
+        goes before anything else runs.
+
+        The working copy is untouched either way: removing a link removes the
+        link.
+        """
+        reply = QMessageBox.warning(
+            self,
+            "Replace with an install",
+            "Remove %s and build it from:\n  %s\n\n"
+            "The link goes; the working copy does not. Edits there stop being "
+            "live in the next resolve, which is the point of doing this.\n\n"
+            "This runs a build and can take a minute."
+            % (package.request, source),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,  # it removes something: never the default
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        _packages, root, _label = self._section_for(listing)
+        error = delete_package(package, root)
+        if error:
+            QMessageBox.warning(self, "Nothing was replaced", error)
+            return
+        self._build_from(source, link=False, verb="Replace")
+
+    def _set_version(self, source: str) -> None:
+        """Edit the version a checkout declares, in place."""
+        current = definition_fields(source).get("version", "")
+        new, accepted = QInputDialog.getText(
+            self,
+            "Set version",
+            "Version for %s:" % Path(source).name,
+            text=current,
+        )
+        if not accepted or new.strip() == current:
+            return
+
+        # The version we showed goes back with the edit: these are working
+        # copies, usually open in an editor, and writing over somebody's change
+        # because a dialog was left open is worse than not writing.
+        error = set_version(source, new, expect_current=current)
+        if error:
+            QMessageBox.warning(self, "Version not changed", error)
+            return
+
+        self.reload_all()
+        self.statusBar().showMessage(
+            "%s is now %s" % (Path(source).name, new.strip()), 8000
+        )
+
     def _uninstalled_menu(self, listing, item, source: str, point) -> None:
         """Right-click on something in the working location that is not built."""
         menu = QMenu(self)
@@ -2026,11 +2111,21 @@ class MainWindow(QMainWindow):
             "Link to working copy (live)"
         )
         menu.addSeparator()
+        # Only here. An installed package's definition is build output, and a
+        # linked one is read through the link -- change either and the version
+        # it declares stops matching the directory it sits in, which is the
+        # mismatch this list flags in red. A checkout is the one of the three
+        # that is somebody's source.
+        version_action = menu.addAction("Set version...")
+        menu.addSeparator()
         browse_action = menu.addAction("Browse folder")
         copy_action = menu.addAction("Copy path")
 
         chosen = menu.exec(listing.mapToGlobal(point))
         if chosen is None:
+            return
+        if chosen is version_action:
+            self._set_version(source)
             return
         if chosen is copy_action:
             QApplication.clipboard().setText(source)
@@ -2078,7 +2173,8 @@ class MainWindow(QMainWindow):
         # here is exactly the kind of thing that costs an afternoon.
         self.reload_all()
         if verb:
-            done = verb + "ed"
+            # "Replace" + "ed" is not a word.
+            done = verb + ("d" if verb.endswith("e") else "ed")
         elif not link:
             done = "Installed"
         else:
