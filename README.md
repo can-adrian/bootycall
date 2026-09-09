@@ -145,6 +145,25 @@ a closed section still reports what is inside it:
 ☑ ▾ Dev Packages                     6 installed · 2 not      1 in use  2 outranked
 ```
 
+### Browsing to what a section is of
+
+**Right-click a section header** for the folders behind it. A section is a view
+of a place on disk, and the fastest way to answer "what is actually in there" is
+to be standing in it.
+
+| Section | Opens |
+|---|---|
+| Local packages | the local root |
+| Dev packages | the dev root, and the working location |
+| Resolved packages | the show folder, and the show's package root |
+
+The resolve has no root of its own, so it offers the two it is assembled from.
+Only folders that exist are listed — a menu entry that opens nothing is worse
+than one that is not offered — and the paths can be copied instead of opened.
+
+The title is a button and swallows the right-click the bar around it would have
+reported, so it forwards it: the words are the one place people aim for.
+
 ### Switching a section off
 
 The checkbox decides whether that section's packages are **in play**. Both start
@@ -373,6 +392,11 @@ running DCC, so BootyCall never blurs the two. Both paths are in Settings.
 The ones that are not are greyed, marked *(not installed)*, and their tick is
 drawn but dead — enabling a package that is not there would be a promise the
 resolve then breaks. Right-click one to install or link it.
+
+An uninstalled row carries **the version it would install as, in brackets**:
+`shot_tools  (2.0.0)  (not installed)`. Brackets where an installed row uses
+`name-version`, and the punctuation carries the difference — a dash is what the
+package *is*, brackets are what this checkout *would be*.
 
 **Checkouts are paired with their builds by the name the package declares, not
 the folder it sits in.** A checkout called `rig_utils-alembic-properties` whose

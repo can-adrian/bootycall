@@ -10,6 +10,26 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.19.0
+
+Minor: get to the folder from the header, and see what a checkout would install as.
+
+- **Right-click a section header to browse what it is a view of.** Local
+  packages opens the local root; Dev packages offers the dev root and the
+  working location; Resolved packages, which has no root of its own, offers the
+  two it is assembled from — the show folder and the show's package root. Paths
+  can be copied instead of opened, and a root that is not there is simply not in
+  the menu.
+
+  The title is a `QToolButton` and swallows the right-click the bar around it
+  would have reported, so it forwards it too — the words are the one place
+  people aim for, and would have been the one place that did nothing.
+
+- **An uninstalled dev row shows the version it would install as**:
+  `shot_tools  (2.0.0)  (not installed)`. Brackets, where an installed row uses
+  `name-version`, so the punctuation carries the difference: a dash is what the
+  package is, brackets are what the checkout would be.
+
 ## 0.18.0
 
 Minor: the Settings dialog is four rows and a panel.

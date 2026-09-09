@@ -385,6 +385,9 @@ class MainWindow(QMainWindow):
         # always-on control was only ever a greyed-out thing to wonder about.
         self.resolve_frame = CollapsibleFrame("Resolved packages", expanded=False)
         self.resolve_frame.toggled.connect(self._on_frame_toggled)
+        self.resolve_frame.headerMenuRequested.connect(
+            lambda point: self._on_section_menu("resolve", point)
+        )
         self.package_list = QListWidget()
         self.package_list.setItemDelegate(PackageItemDelegate(self))
         self.package_list.setSelectionMode(QListWidget.ExtendedSelection)
@@ -401,6 +404,9 @@ class MainWindow(QMainWindow):
             self.local_path_label,
             self.local_list,
         ) = self._build_package_section("Local packages")
+        self.local_frame.headerMenuRequested.connect(
+            lambda point: self._on_section_menu("local", point)
+        )
         self.local_frame.set_checked(self._use_local)
         root.addWidget(self.local_frame)
         self._local_index = root.count() - 1
@@ -414,6 +420,9 @@ class MainWindow(QMainWindow):
             "Dev Packages", expanded=True, show_path=False
         )
         self.dev_list.itemChanged.connect(self._on_dev_item_changed)
+        self.dev_frame.headerMenuRequested.connect(
+            lambda point: self._on_section_menu("dev", point)
+        )
         self.dev_frame.set_checked(self._use_dev)
         root.addWidget(self.dev_frame)
         self._dev_index = root.count() - 1
@@ -1557,6 +1566,12 @@ class MainWindow(QMainWindow):
         }
         for package in sorted(missing, key=lambda w: w.name.lower()):
             label = package.package_name
+            if package.package_version:
+                # Bracketed, where an installed row uses name-version. The
+                # punctuation carries the difference: a dash is what the
+                # package *is*, brackets are what this checkout *would*
+                # install as.
+                label += "  (%s)" % package.package_version
             if package.renamed or package.package_name in shared:
                 # The folder is the only thing that tells two worktrees of one
                 # package apart, so it is on the row whenever there are two.
@@ -1866,6 +1881,70 @@ class MainWindow(QMainWindow):
             if package is not None:
                 found.append(package)
         return found
+
+    def section_folders(self, section: str) -> list[tuple[str, str]]:
+        """``(label, path)`` for each folder a section header can open.
+
+        A section is a view of a place on disk, and the fastest way to answer
+        "what is actually in there" is to be standing in it. The resolve has no
+        single root of its own, so it offers the two it is assembled from: the
+        show, and wherever the show's own package lives.
+
+        Only folders that exist. A menu entry that opens nothing is worse than
+        one that is not offered.
+        """
+        found: list[tuple[str, str]] = []
+        if section == "dev":
+            found.append(("Dev packages", str(dev_root())))
+            found.append(("Dev working location", str(self.dev_working_root_path())))
+        elif section == "local":
+            found.append(("Local packages", str(local_root())))
+        else:
+            project = self.current_project()
+            if project is not None:
+                found.append(("Show folder", str(project.path)))
+            show_pkg = self.show_package()
+            if show_pkg is not None:
+                found.append(("Show package root", str(show_pkg.root)))
+
+        return [(label, path) for label, path in found if Path(path).is_dir()]
+
+    def _on_section_menu(self, section: str, point) -> None:
+        """Right-click on a section header: open what the section is a view of."""
+        folders = self.section_folders(section)
+        menu = QMenu(self)
+        if not folders:
+            # Said rather than shown empty: an empty menu reads as a bug in the
+            # menu, not as an answer about the folders.
+            dead = menu.addAction("Nothing to browse yet")
+            dead.setEnabled(False)
+            menu.exec(point)
+            return
+
+        actions = {}
+        for label, path in folders:
+            actions[menu.addAction("Browse %s" % label.lower())] = path
+        menu.addSeparator()
+        copy_action = menu.addAction(
+            "Copy path" if len(folders) == 1 else "Copy paths"
+        )
+
+        chosen = menu.exec(point)
+        if chosen is None:
+            return
+        if chosen is copy_action:
+            QApplication.clipboard().setText("\n".join(p for _l, p in folders))
+            self.statusBar().showMessage(
+                "Copied %d path%s"
+                % (len(folders), "" if len(folders) == 1 else "s"),
+                4000,
+            )
+            return
+        path = actions.get(chosen)
+        if path:
+            errors = self.browse_paths([path])
+            if errors:
+                self.statusBar().showMessage(errors[0], 6000)
 
     def _on_package_menu(self, listing: QListWidget, point) -> None:
         clicked = listing.itemAt(point)

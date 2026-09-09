@@ -2530,10 +2530,20 @@ _renamed_rows = [
     if "rig_utils" in window.dev_list.item(i).text()
 ]
 check(
-    "an uninstalled checkout is listed under its package name, folder in brackets",
-    _renamed_rows == ["rig_utils_alembic_properties  (rig_utils-alembic-properties)"
-                      "  (not installed)"],
+    "an uninstalled checkout is listed under its package name, with the "
+    "version it would install as and the folder it is in",
+    _renamed_rows == [
+        "rig_utils_alembic_properties  (0.3.1)"
+        "  (rig_utils-alembic-properties)  (not installed)"
+    ],
     str(_renamed_rows),
+)
+# Brackets where an installed row uses name-version: a dash is what the package
+# is, brackets are what this checkout would install as.
+check(
+    "which is not the spelling an installed row uses",
+    "rig_utils_alembic_properties-0.3.1" not in _renamed_rows[0],
+    _renamed_rows[0],
 )
 
 _saved_rename_cmd = cfg_mod.DEV_INSTALL_COMMAND
@@ -3648,6 +3658,111 @@ if _have_links:
         str(_vrow[0].foreground().color().name()) if _vrow else "",
     )
 
+    cfg_mod.set_path_overrides({})
+    window.refresh_package_lists()
+    QApplication.processEvents()
+
+print("\nright-clicking a section header opens what it is a view of")
+pin("batman_returns")
+_hdr_work = Path(tempfile.mkdtemp(prefix="bootycall-hdrwork-"))
+cfg_mod.set_path_overrides({"dev_working_root": str(_hdr_work)})
+window.refresh_package_lists()
+QApplication.processEvents()
+
+check(
+    "dev offers both of its roots - the one that resolves and the one you edit",
+    [l for l, _p in window.section_folders("dev")]
+    == ["Dev packages", "Dev working location"],
+    str(window.section_folders("dev")),
+)
+check(
+    "local offers its own",
+    [l for l, _p in window.section_folders("local")] == ["Local packages"],
+    str(window.section_folders("local")),
+)
+check(
+    "and the resolve, which has no root of its own, offers the two it is "
+    "assembled from",
+    [l for l, _p in window.section_folders("resolve")]
+    == ["Show folder", "Show package root"],
+    str(window.section_folders("resolve")),
+)
+check(
+    "every path offered is a folder that exists - an entry that opens nothing "
+    "is worse than one that is not offered",
+    all(
+        Path(p).is_dir()
+        for section in ("dev", "local", "resolve")
+        for _l, p in window.section_folders(section)
+    ),
+)
+cfg_mod.set_path_overrides({"dev_working_root": str(_hdr_work / "gone")})
+check(
+    "so a root that is not there is simply not in the menu",
+    [l for l, _p in window.section_folders("dev")] == ["Dev packages"],
+    str(window.section_folders("dev")),
+)
+cfg_mod.set_path_overrides({"dev_working_root": str(_hdr_work)})
+
+_section_labels = []
+_section_opened = []
+
+
+class _SectionMenu:
+    def __init__(self, *a, **k):
+        pass
+
+    def addAction(self, label):
+        _section_labels.append(label)
+        return label
+
+    def addSeparator(self):
+        pass
+
+    def exec(self, *a):
+        return _section_labels[0] if _section_labels else None
+
+
+_real_browse = window.browse_paths
+_real_menu4 = mw_mod.QMenu
+window.browse_paths = lambda paths: (_section_opened.extend(paths), [])[1]
+mw_mod.QMenu = _SectionMenu
+try:
+    window._on_section_menu("dev", None)
+    check(
+        "the menu names each folder, and offers the paths as well",
+        _section_labels[:2]
+        == ["Browse dev packages", "Browse dev working location"]
+        and "Copy paths" in _section_labels,
+        str(_section_labels),
+    )
+    check(
+        "and choosing one opens it",
+        _section_opened == [str(_lp.dev_root())],
+        str(_section_opened),
+    )
+
+    # The title is a button, so it swallows the right-click the bar around it
+    # would have reported -- and the words are the one place people aim for.
+    # Both are emitted here with the menu still faked, or exec() would block on
+    # a real one.
+    _forwarded = []
+    window.local_frame.headerMenuRequested.connect(lambda p: _forwarded.append(p))
+    window.local_frame.toggle_button.customContextMenuRequested.emit(
+        window.local_frame.toggle_button.rect().center()
+    )
+    window.local_frame.header.customContextMenuRequested.emit(
+        window.local_frame.header.rect().center()
+    )
+    QApplication.processEvents()
+    check(
+        "both the title and the bar around it report the click",
+        len(_forwarded) == 2,
+        str(len(_forwarded)),
+    )
+finally:
+    mw_mod.QMenu = _real_menu4
+    window.browse_paths = _real_browse
     cfg_mod.set_path_overrides({})
     window.refresh_package_lists()
     QApplication.processEvents()

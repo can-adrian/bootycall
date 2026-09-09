@@ -50,6 +50,10 @@ class CollapsibleFrame(QWidget):
 
     toggled = Signal(bool)
     checkChanged = Signal(bool)
+    #: Right-click anywhere on the header bar, with the global point to put a
+    #: menu at. The frame does not know what belongs in that menu -- what a
+    #: section is *of* is the window's business -- so it only reports the click.
+    headerMenuRequested = Signal(object)
 
     def __init__(
         self,
@@ -68,6 +72,10 @@ class CollapsibleFrame(QWidget):
 
         header = QWidget()
         header.setObjectName("collapsibleHeader")
+        header.setContextMenuPolicy(Qt.CustomContextMenu)
+        header.customContextMenuRequested.connect(
+            lambda point: self.headerMenuRequested.emit(header.mapToGlobal(point))
+        )
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(8, 5, 10, 5)
         header_layout.setSpacing(8)
@@ -93,6 +101,15 @@ class CollapsibleFrame(QWidget):
             QSizePolicy.Minimum, QSizePolicy.Fixed
         )
         self.toggle_button.clicked.connect(self.set_expanded)
+        # The title is a button, so it swallows the right-click that the bar
+        # around it would have reported. Forward it, or the one place people
+        # aim for -- the words -- would be the one place that does nothing.
+        self.toggle_button.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.toggle_button.customContextMenuRequested.connect(
+            lambda point: self.headerMenuRequested.emit(
+                self.toggle_button.mapToGlobal(point)
+            )
+        )
         header_layout.addWidget(self.toggle_button)
 
         header_layout.addStretch(1)
@@ -114,6 +131,7 @@ class CollapsibleFrame(QWidget):
         self.alert.setVisible(False)
         header_layout.addWidget(self.alert)
 
+        self.header = header
         outer.addWidget(header)
 
         self.content = QWidget()

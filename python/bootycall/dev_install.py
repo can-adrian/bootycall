@@ -55,6 +55,9 @@ class WorkingPackage:
     definition: str = ""
     #: Why it cannot be installed, when it cannot. Empty means it can.
     problem: str = ""
+    #: The version the definition declares, or "" when it declares none or
+    #: cannot be read. What this checkout would install as.
+    package_version: str = ""
     #: What the definition calls itself, which need not be the folder name.
     #: Falls back to the folder name when the definition cannot be read.
     #:
@@ -109,14 +112,15 @@ def list_working_packages(root: Path | str | None = None) -> list[WorkingPackage
         path = Path(entry.path)
         definition = _definition_in(path)
         problem = "" if definition else "no package definition in it"
-        declared = definition_fields(path).get("name", "") if definition else ""
+        fields = definition_fields(path) if definition else {}
         found.append(
             WorkingPackage(
                 name=entry.name,
                 path=path,
                 definition=definition,
                 problem=problem,
-                package_name=declared or entry.name,
+                package_name=fields.get("name") or entry.name,
+                package_version=fields.get("version", ""),
             )
         )
     return found
