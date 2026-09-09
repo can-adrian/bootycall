@@ -135,6 +135,11 @@ TAGLINES: tuple[str, ...] = (
     "But when that Hotline Bling, that Can only mean one thing...",
     "DAT ENV.",
     "Let them Eat Cake.",
+    "Highest version wins. Even yours.",
+    "Two roots, one env.",
+    "A package for every occasion, and three you forgot about.",
+    "Environments in the streets, symlinks in the sheets.",
+    "Packaging Heat Since 2026.",
 )
 
 

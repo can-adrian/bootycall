@@ -1428,7 +1428,7 @@ check(
 print("\nbranding")
 from bootycall.ui.main_window import TAGLINES  # noqa: E402
 
-check("nine taglines", len(TAGLINES) == 9, str(len(TAGLINES)))
+check("fourteen taglines", len(TAGLINES) == 14, str(len(TAGLINES)))
 check(
     "none of them repeat - the list is hand-kept and a duplicate would only "
     "show up as one turning up twice as often",

@@ -10,6 +10,18 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.20.2
+
+Patch: five more taglines.
+
+- *Highest version wins. Even yours.* / *Two roots, one env.* / *A package for
+  every occasion, and three you forgot about.* / *Environments in the streets,
+  symlinks in the sheets.* / *Packaging Heat Since 2026.*
+
+  Fourteen now. The first two are the two rules that have cost the most time in
+  this project — rez takes the highest version across every root, and a link is
+  not a build — which is not the worst place for them to live.
+
 ## 0.20.1
 
 Patch: four more taglines.
