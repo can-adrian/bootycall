@@ -10,6 +10,20 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.19.1
+
+Patch: an uninstalled row leads with its folder.
+
+- **`rig_utils-alembic  (rig_utils-1.3.9)`**, not the other way round. 0.19.0
+  led with the package name, which is the part every worktree of a package
+  shares — so three branches made three rows that read alike, and the folder,
+  the one thing telling them apart, was the afterthought in brackets.
+
+  The bracket is now what rez would call what the checkout builds, spelled the
+  way an installed package is spelled, because it is the same thing one step
+  earlier. No bracket where there is nothing to build, or where it would only
+  repeat the folder's own name.
+
 ## 0.19.0
 
 Minor: get to the folder from the header, and see what a checkout would install as.

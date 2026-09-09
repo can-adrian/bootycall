@@ -393,10 +393,22 @@ The ones that are not are greyed, marked *(not installed)*, and their tick is
 drawn but dead — enabling a package that is not there would be a promise the
 resolve then breaks. Right-click one to install or link it.
 
-An uninstalled row carries **the version it would install as, in brackets**:
-`shot_tools  (2.0.0)  (not installed)`. Brackets where an installed row uses
-`name-version`, and the punctuation carries the difference — a dash is what the
-package *is*, brackets are what this checkout *would be*.
+An uninstalled row is **named for its folder**, with what it would build in
+brackets:
+
+```
+rig_utils-alembic  (rig_utils-1.3.9)  (not installed)
+rig_utils-fix      (rig_utils-1.4.0)  (not installed)
+shot_tools         (shot_tools-2.0.0) (not installed)
+notes              (not installed)
+```
+
+The folder leads because that is what tells one worktree from another — naming
+them all after the package they share would make rows that read alike. The
+bracket is spelled the way an installed package is spelled, because it is the
+same thing one step earlier. A folder with no package definition gets no
+bracket: there is nothing it would build. Nor does one whose bracket would only
+repeat its own name.
 
 **Checkouts are paired with their builds by the name the package declares, not
 the folder it sits in.** A checkout called `rig_utils-alembic-properties` whose

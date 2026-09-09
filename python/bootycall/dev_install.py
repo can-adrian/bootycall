@@ -77,6 +77,22 @@ class WorkingPackage:
         """Is the folder spelled differently from the package inside it?"""
         return bool(self.package_name) and self.package_name != self.name
 
+    @property
+    def request(self) -> str:
+        """How rez would name what this checkout builds, or "" if it is not a
+        package.
+
+        The same spelling an installed package uses, because it is the same
+        thing one step earlier.
+        """
+        if not self.is_package or not self.package_name:
+            return ""
+        return (
+            "%s-%s" % (self.package_name, self.package_version)
+            if self.package_version
+            else self.package_name
+        )
+
 
 def _definition_in(directory: Path) -> str:
     for filename in DEFINITION_FILES:

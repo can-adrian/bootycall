@@ -1559,23 +1559,20 @@ class MainWindow(QMainWindow):
         if listing.count() == 1 and not listing.item(0).data(_PACKAGE_PATH_ROLE):
             listing.takeItem(0)
 
-        shared = {
-            w.package_name
-            for w in working
-            if len([o for o in working if o.package_name == w.package_name]) > 1
-        }
         for package in sorted(missing, key=lambda w: w.name.lower()):
-            label = package.package_name
-            if package.package_version:
-                # Bracketed, where an installed row uses name-version. The
-                # punctuation carries the difference: a dash is what the
-                # package *is*, brackets are what this checkout *would*
-                # install as.
-                label += "  (%s)" % package.package_version
-            if package.renamed or package.package_name in shared:
-                # The folder is the only thing that tells two worktrees of one
-                # package apart, so it is on the row whenever there are two.
-                label += "  (%s)" % package.name
+            # The folder leads. It is what tells one worktree from another --
+            # rig_utils-alembic from rig_utils-fix -- and naming them all after
+            # the package they share would make three rows that read alike.
+            #
+            # The bracket is what rez would call what the checkout builds,
+            # spelled the way an installed row spells it, because it is the
+            # same thing one step earlier. A folder with no package definition
+            # in it gets no bracket: there is nothing it would build.
+            label = package.name
+            if package.request and package.request != package.name:
+                # Unless it would only repeat the folder: a package with no
+                # version whose folder is named after it has nothing to add.
+                label += "  (%s)" % package.request
             item = QListWidgetItem("%s  (not installed)" % label)
             item.setData(_SOURCE_PATH_ROLE, str(package.path))
             item.setForeground(QColor(_ROW_QUIET))

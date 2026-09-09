@@ -2529,21 +2529,16 @@ _renamed_rows = [
     for i in range(window.dev_list.count())
     if "rig_utils" in window.dev_list.item(i).text()
 ]
+# The folder leads: it is what tells one worktree from another, and naming
+# them all after the package they share would make rows that read alike. The
+# bracket is what rez would call what the checkout builds.
 check(
-    "an uninstalled checkout is listed under its package name, with the "
-    "version it would install as and the folder it is in",
+    "an uninstalled checkout is listed by its folder, with what it would build",
     _renamed_rows == [
-        "rig_utils_alembic_properties  (0.3.1)"
-        "  (rig_utils-alembic-properties)  (not installed)"
+        "rig_utils-alembic-properties"
+        "  (rig_utils_alembic_properties-0.3.1)  (not installed)"
     ],
     str(_renamed_rows),
-)
-# Brackets where an installed row uses name-version: a dash is what the package
-# is, brackets are what this checkout would install as.
-check(
-    "which is not the spelling an installed row uses",
-    "rig_utils_alembic_properties-0.3.1" not in _renamed_rows[0],
-    _renamed_rows[0],
 )
 
 _saved_rename_cmd = cfg_mod.DEV_INSTALL_COMMAND

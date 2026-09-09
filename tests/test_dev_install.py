@@ -664,6 +664,41 @@ check(
     str(di.installed_source(_wt_link)),
 )
 
+print("\nwhat a checkout would build, spelled the way rez would")
+_req = Path(tempfile.mkdtemp(prefix="bootycall-request-"))
+for _folder, _name, _ver in (
+    ("rig_utils-alembic", "rig_utils", "1.3.9"),
+    ("shot_tools", "shot_tools", "2.0.0"),
+    ("unversioned", "unversioned", None),
+):
+    (_req / _folder).mkdir(parents=True)
+    (_req / _folder / "package.py").write_text(
+        'name = "%s"\n' % _name + ('version = "%s"\n' % _ver if _ver else "")
+    )
+(_req / "notes").mkdir()
+
+_by_folder = {w.name: w for w in di.list_working_packages(_req)}
+check(
+    "the version the definition declares is read alongside the name",
+    _by_folder["rig_utils-alembic"].package_version == "1.3.9",
+    _by_folder["rig_utils-alembic"].package_version,
+)
+check(
+    "and the request is the same spelling an installed package uses",
+    _by_folder["rig_utils-alembic"].request == "rig_utils-1.3.9",
+    _by_folder["rig_utils-alembic"].request,
+)
+check(
+    "a package with no version is just its name",
+    _by_folder["unversioned"].request == "unversioned",
+    _by_folder["unversioned"].request,
+)
+check(
+    "and a folder that is not a package would build nothing",
+    _by_folder["notes"].request == "",
+    _by_folder["notes"].request,
+)
+
 print()
 if failures:
     print("%d FAILED: %s" % (len(failures), ", ".join(failures)))
