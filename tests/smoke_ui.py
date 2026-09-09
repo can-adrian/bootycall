@@ -1428,7 +1428,13 @@ check(
 print("\nbranding")
 from bootycall.ui.main_window import TAGLINES  # noqa: E402
 
-check("five taglines", len(TAGLINES) == 5, str(len(TAGLINES)))
+check("nine taglines", len(TAGLINES) == 9, str(len(TAGLINES)))
+check(
+    "none of them repeat - the list is hand-kept and a duplicate would only "
+    "show up as one turning up twice as often",
+    len(set(TAGLINES)) == len(TAGLINES),
+    str([t for t in TAGLINES if TAGLINES.count(t) > 1]),
+)
 check("the tagline is quoted", window.tagline.text().startswith("\u201c") and window.tagline.text().endswith("\u201d"), window.tagline.text())
 check(
     "and the text inside is one of the list",

@@ -131,6 +131,10 @@ TAGLINES: tuple[str, ...] = (
     "Because, Fuck You, That's Why.",
     "Pull yourself up by your Bootstrap.",
     "If your Grandma had wheels, She would be a Bicycle",
+    "Environments with Benefits.",
+    "But when that Hotline Bling, that Can only mean one thing...",
+    "DAT ENV.",
+    "Let them Eat Cake.",
 )
 
 

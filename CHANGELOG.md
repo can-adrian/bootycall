@@ -10,6 +10,15 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.20.1
+
+Patch: four more taglines.
+
+- *Environments with Benefits.*, *But when that Hotline Bling, that Can only
+  mean one thing...*, *DAT ENV.* and *Let them Eat Cake.* Nine now, and a test
+  that they are all distinct — the list is hand-kept, and a duplicate would
+  only ever show up as one of them turning up twice as often as the rest.
+
 ## 0.20.0
 
 Minor: edit a checkout's version, and turn a link back into a build.
