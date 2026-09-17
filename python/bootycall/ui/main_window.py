@@ -110,6 +110,10 @@ _PROBLEM_ROLE = Qt.UserRole + 4
 #: mean a filter of "over" quietly matching every row that says "overrides",
 #: and changing what it matched every time the resolve changed.
 _FILTER_ROLE = Qt.UserRole + 5
+#: On a section heading in the dev list. Headings carry none of the roles
+#: above -- they are not packages, and every pass that asks a row "which
+#: package are you?" goes on skipping them for exactly that reason.
+_HEADER_ROLE = Qt.UserRole + 6
 
 #: Row colours, matching the counts in the section header exactly. A header
 #: that says "2 outranked" in red over two grey rows makes the reader work out
@@ -128,6 +132,11 @@ _ROW_APPENDED = "#4aa3df"
 #: show -- it just is not in play right now -- and painting it plain hid the
 #: fact that ticking it would change the launch.
 _ROW_STANDBY = "#a3762c"
+
+#: A section heading in the dev list. Dimmer than any package row: it is a
+#: label on the list, not a thing in it, and a heading that competes with the
+#: packages under it is a heading you read instead of them.
+_ROW_HEADING = "#6f8199"
 
 #: Shown under the logo in quotes, one at random per launch. Stored unquoted so
 #: the list stays the source of truth for the text itself.
@@ -579,9 +588,14 @@ class MainWindow(QMainWindow):
                     wanted.add(name)
 
         shown = 0
+        headings: list[tuple[QListWidgetItem, int]] = []
         for row in range(listing.count()):
             item = listing.item(row)
             haystack = item.data(_FILTER_ROLE)
+            if item.data(_HEADER_ROLE):
+                headings.append((item, 0))
+                item.setHidden(False)
+                continue
             if not text or not haystack:
                 # A row with nothing to match on -- the placeholder, or the
                 # line that says the root could not be read -- is not a package
@@ -589,10 +603,18 @@ class MainWindow(QMainWindow):
                 # nobody asked.
                 item.setHidden(False)
                 shown += 1 if haystack else 0
+                if headings and haystack:
+                    headings[-1] = (headings[-1][0], headings[-1][1] + 1)
                 continue
             hit = text in haystack or item.data(_PACKAGE_NAME_ROLE) in wanted
             item.setHidden(not hit)
             shown += 1 if hit else 0
+            if headings and hit:
+                headings[-1] = (headings[-1][0], headings[-1][1] + 1)
+
+        # A heading over nothing is a promise the list is not keeping.
+        for heading, count in headings:
+            heading.setHidden(not count)
 
         if field is not None:
             # Red when it matches nothing, which is the one case where an empty
@@ -1650,6 +1672,7 @@ class MainWindow(QMainWindow):
         if listing.count() == 1 and not listing.item(0).data(_PACKAGE_PATH_ROLE):
             listing.takeItem(0)
 
+        self._add_heading(listing, "Not installed")
         for package in sorted(missing, key=lambda w: w.name.lower()):
             # The folder leads. It is what tells one worktree from another --
             # rig_utils-alembic from rig_utils-fix -- and naming them all after
@@ -1664,14 +1687,16 @@ class MainWindow(QMainWindow):
                 # Unless it would only repeat the folder: a package with no
                 # version whose folder is named after it has nothing to add.
                 label += "  (%s)" % package.request
-            item = QListWidgetItem("%s  (not installed)" % label)
+            item = QListWidgetItem(label)
             item.setData(_SOURCE_PATH_ROLE, str(package.path))
             item.setData(_FILTER_ROLE, label.lower())
             item.setForeground(QColor(_ROW_QUIET))
-            # The box is drawn but cannot be ticked: enabling a package that
-            # is not there would be a lie the resolve then contradicts.
-            item.setFlags(item.flags() & ~Qt.ItemIsUserCheckable)
-            item.setCheckState(Qt.Unchecked)
+            # No box at all, not a greyed-out one. Under a heading that says
+            # these are not installed, a checkbox that cannot be ticked is a
+            # control offering to do the thing the heading just said it
+            # cannot. Indented to the same column as the rows that do have
+            # one, so the two groups read as one list.
+            item.setData(INDENT_ROLE, 1)
             listing.addItem(item)
 
         self._refresh_dev_badge(listing, installed, missing)
@@ -1753,6 +1778,13 @@ class MainWindow(QMainWindow):
             # Rows by package name, in list order, so the checkbox can go on
             # one row per name once the whole list is built.
             by_name: dict[str, list[QListWidgetItem]] = {}
+            if tickable:
+                # The dev list is two lists in one -- what rez can see, and
+                # what is sitting in your working location waiting to be built
+                # -- and a row that had to end in "(not installed)" to say
+                # which was a row that spent its last word on the answer to a
+                # question the list could have answered once, at the top.
+                self._add_heading(listing, "Installed")
             for package in packages:
                 # Two spaces, not the six the override marks use: this belongs
                 # to the package's name, not to what the resolve makes of it,
@@ -1820,6 +1852,27 @@ class MainWindow(QMainWindow):
 
         return packages
 
+    def _add_heading(self, listing: QListWidget, text: str) -> QListWidgetItem:
+        """A label on the list, not a row in it.
+
+        It carries no package role of any kind, which is what keeps every pass
+        that walks this list -- the override marks, the checkbox sync, the
+        filter, the context menu -- skipping it without being told to.
+        """
+        item = QListWidgetItem(text)
+        item.setData(_HEADER_ROLE, True)
+        item.setForeground(QColor(_ROW_HEADING))
+        font = item.font()
+        font.setBold(True)
+        item.setFont(font)
+        # Enabled, so it is painted in its own colour rather than the style's
+        # disabled grey -- but not selectable, because selecting a label does
+        # nothing and a selected label that does nothing invites a right-click
+        # that also does nothing.
+        item.setFlags(Qt.ItemIsEnabled)
+        listing.addItem(item)
+        return item
+
     def _place_dev_checks(self, by_name: dict) -> None:
         """One checkbox per dev package name, on the build that wins.
 
@@ -1855,7 +1908,7 @@ class MainWindow(QMainWindow):
                         else Qt.Unchecked
                     )
                 else:
-                    item.setData(INDENT_ROLE, True)
+                    item.setData(INDENT_ROLE, 2)
 
     def _on_dev_item_changed(self, item: QListWidgetItem) -> None:
         """A dev package was ticked or unticked."""
@@ -2618,6 +2671,10 @@ class MainWindow(QMainWindow):
         Every version of an overriding name moves, not just the winning one, so
         a name's builds stay together and the "(older build)" rows keep sitting
         under the one that beat them. Order within each group is untouched.
+
+        Rows never cross a heading. Lifting a package out from under
+        "Installed" and dropping it above the heading would file it under
+        nothing, which is a worse answer than having to scroll.
         """
         if not overrides or listing.count() < 2:
             return
@@ -2627,22 +2684,37 @@ class MainWindow(QMainWindow):
         if not any(name in overrides for name in names if name):
             return
 
-        # Stable partition: taking items out of a QListWidget renumbers the
-        # rest, so the order is decided first and applied afterwards.
-        wanted = [
-            item
-            for item, name in zip(rows, names)
-            if name and name in overrides
-        ]
-        rest = [item for item in rows if item not in wanted]
-        if [id(i) for i in wanted + rest] == [id(i) for i in rows]:
+        # Stable partition, one block at a time, where a block is the run of
+        # rows under one heading. Taking items out of a QListWidget renumbers
+        # the rest, so the whole order is decided first and applied afterwards.
+        order: list[QListWidgetItem] = []
+        block: list[QListWidgetItem] = []
+
+        def flush() -> None:
+            hits = [
+                item
+                for item in block
+                if item.data(_PACKAGE_NAME_ROLE) in overrides
+            ]
+            order.extend(hits + [item for item in block if item not in hits])
+            block.clear()
+
+        for item in rows:
+            if item.data(_HEADER_ROLE):
+                flush()
+                order.append(item)
+                continue
+            block.append(item)
+        flush()
+
+        if [id(i) for i in order] == [id(i) for i in rows]:
             return  # already in that order; reordering would only flicker
 
         blocked = listing.blockSignals(True)
         selected = {id(item) for item in listing.selectedItems()}
         for _ in range(listing.count()):
             listing.takeItem(0)
-        for item in wanted + rest:
+        for item in order:
             listing.addItem(item)
             if id(item) in selected:
                 item.setSelected(True)

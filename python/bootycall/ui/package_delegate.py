@@ -8,14 +8,14 @@ followed by a fact about the install.
 Qt's default item painting draws all of that in one weight, so the reader has
 to parse the string to see which half is which. This delegate italicises
 anything in brackets, which is exactly the set of asides -- ``(symlinked)``,
-``(not installed)``, ``(older build)``, ``(show package)`` -- and leaves the
-package itself upright.
+``(live)``, ``(older build)``, ``(show package)`` -- and leaves the package
+itself upright.
 
-It also indents the rows marked with :data:`INDENT_ROLE`, which is how a list
-says "this one is subordinate to the one above" -- an older build of a package
-whose newest build carries the decision. Qt draws a row with no checkbox
-further left than one with, so left alone the subordinate rows would stand out
-to the *left* of the row they belong under.
+It also indents the rows marked with :data:`INDENT_ROLE`, at one of two
+levels: a package under a section heading, and an older build under the build
+of the same name that beat it. Qt draws a row with no checkbox further left
+than one with, so left alone those rows would stand out to the *left* of the
+rows they sit among.
 
 It paints only the text. The checkbox, the selection background and the focus
 rectangle are still drawn by the style, because reimplementing those is how a
@@ -39,14 +39,20 @@ from PySide6.QtWidgets import (
 #: unclosed bracket cannot swallow the rest of the row.
 _BRACKETED = re.compile(r"(\([^()\n]*\))")
 
-#: Set on an item to draw its text indented, under the row it belongs to.
+#: How far in to draw a row's text, as a level rather than a number of pixels.
 #: Deliberately far from the roles the window itself hands out, so the two
 #: blocks cannot grow into each other.
+#:
+#: 1 -- a package under a section heading. Its text lines up with the text of
+#:      a row that has a checkbox, so a row without one does not stick out to
+#:      the left of the rows beside it.
+#: 2 -- an older build, under the build of the same name that beat it. One
+#:      step further in, because level with is only what a row that happened
+#:      to have no checkbox looks like.
 INDENT_ROLE = Qt.UserRole + 20
 
-#: Added on top of the checkbox's width, so an indented row sits *past* the
-#: text above it rather than merely level with it. Level would only look like
-#: a row that happened to have no checkbox.
+#: The second step. Small: it has to read as "belongs to the row above"
+#: without the rows starting to look like a different list.
 _EXTRA_INDENT = 12
 
 
@@ -59,14 +65,17 @@ def runs(text: str) -> list[tuple[str, bool]]:
     ]
 
 
-def indent_for(opt, style, widget) -> int:
-    """How far to shift a subordinate row's text.
+def indent_for(opt, style, widget, level: int = 1) -> int:
+    """How far to shift an indented row's text, for ``level``.
 
-    Asked of the style rather than guessed: the same option with a checkbox
-    added says where the text *would* start if this row had one, and the
-    difference is exactly the width the style reserves for it. A number picked
-    by eye here would be right until someone changed the stylesheet.
+    The first step is asked of the style rather than guessed: the same option
+    with a checkbox added says where the text *would* start if this row had
+    one, and the difference is exactly the width the style reserves for it. A
+    number picked by eye here would be right until someone changed the
+    stylesheet.
     """
+    if level < 1:
+        return 0
     plain = style.subElementRect(QStyle.SE_ItemViewItemText, opt, widget)
     boxed = QStyleOptionViewItem(opt)
     boxed.features |= QStyleOptionViewItem.HasCheckIndicator
@@ -75,7 +84,7 @@ def indent_for(opt, style, widget) -> int:
         style.subElementRect(QStyle.SE_ItemViewItemText, boxed, widget).left()
         - plain.left()
     )
-    return max(shift, 0) + _EXTRA_INDENT
+    return max(shift, 0) + (_EXTRA_INDENT if level >= 2 else 0)
 
 
 class PackageItemDelegate(QStyledItemDelegate):
@@ -86,8 +95,8 @@ class PackageItemDelegate(QStyledItemDelegate):
         self.initStyleOption(opt, index)
         text = opt.text
         parts = runs(text)
-        indented = bool(index.data(INDENT_ROLE))
-        if len(parts) < 2 and not indented:
+        level = int(index.data(INDENT_ROLE) or 0)
+        if len(parts) < 2 and level < 1:
             # Nothing to set apart. Hand it back to Qt rather than repainting
             # it slightly differently by hand.
             super().paint(painter, option, index)
@@ -103,8 +112,8 @@ class PackageItemDelegate(QStyledItemDelegate):
         rect = style.subElementRect(QStyle.SE_ItemViewItemText, opt, widget)
         if rect.isEmpty():
             return
-        if indented:
-            rect.setLeft(rect.left() + indent_for(opt, style, widget))
+        if level >= 1:
+            rect.setLeft(rect.left() + indent_for(opt, style, widget, level))
             if rect.isEmpty():
                 return
 

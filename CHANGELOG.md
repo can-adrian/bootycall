@@ -10,6 +10,31 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.20.4
+
+Patch: the dev list is grouped under headings instead of labelling every row.
+
+- **`Installed` and `Not installed` headings**, replacing the `(not installed)`
+  suffix. A row that had to end in "(not installed)" to say which half it was
+  in spent its last word on a question the list could answer once, at the top.
+  The headings carry no package role of any kind, which is what keeps every
+  pass that walks this list — the override marks, the checkbox sync, the
+  filter, the context menu — skipping them without being told to.
+- **Every package row is indented under its heading.** Two levels: a package
+  sits where a checkbox puts a row's text, so a row without one does not stick
+  out to the left of the rows beside it; an older build sits one step further
+  in, under the build that beat it. The first step is measured off the style
+  rather than picked by eye.
+- **A checkout that is not installed no longer draws a greyed-out checkbox.**
+  Under a heading that says these are not installed, a box that cannot be
+  ticked is a control offering to do the thing the heading just said it
+  cannot.
+- **Overriding packages are lifted to the top of their group, not out of it.**
+  Floating a row above the heading would have filed it under nothing, which is
+  a worse answer than having to scroll.
+- The filter hides a heading whose group empties out: a heading over nothing is
+  a promise the list is not keeping.
+
 ## 0.20.3
 
 Patch: one checkbox per dev package, and a filter field over the dev list.

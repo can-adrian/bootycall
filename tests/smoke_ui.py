@@ -57,6 +57,25 @@ def select(name) -> None:
     QApplication.processEvents()
 
 
+def dev_rows(visible_only: bool = False) -> list:
+    """The dev list's package rows.
+
+    The headings are labels on the list rather than things in it, and every
+    pass in the window skips them for want of a package role. A test that
+    counted raw rows would be the one place that did not.
+    """
+    from bootycall.ui.main_window import _HEADER_ROLE
+
+    return [
+        item
+        for item in (
+            window.dev_list.item(i) for i in range(window.dev_list.count())
+        )
+        if not item.data(_HEADER_ROLE)
+        and (not visible_only or not item.isHidden())
+    ]
+
+
 def unpin_all() -> None:
     for chip_name in list(window.chip_bar.names()):
         window.chip_bar.remove(chip_name)
@@ -724,12 +743,36 @@ _opt = QStyleOptionViewItem()
 _opt.rect = window.dev_list.viewport().rect()
 _opt.text = ""
 _style = window.dev_list.style()
+_boxed_opt = QStyleOptionViewItem(_opt)
+_boxed_opt.features |= QStyleOptionViewItem.HasCheckIndicator
+_boxed_opt.checkState = Qt.Unchecked
+_plain_left = _style.subElementRect(
+    QStyle.SE_ItemViewItemText, _opt, window.dev_list
+).left()
+_boxed_left = _style.subElementRect(
+    QStyle.SE_ItemViewItemText, _boxed_opt, window.dev_list
+).left()
 check(
-    "a subordinate row is shifted past where a checkbox would put the text",
-    _indent_for(_opt, _style, window.dev_list)
-    > _style.subElementRect(QStyle.SE_ItemViewItemText, _opt, window.dev_list).left()
-    - _opt.rect.left(),
-    str(_indent_for(_opt, _style, window.dev_list)),
+    "a checkbox is what makes level one worth measuring at all",
+    _boxed_left > _plain_left,
+    "%d vs %d" % (_boxed_left, _plain_left),
+)
+check(
+    "level one lands a boxless row's text exactly where a boxed row puts its "
+    "own, so the two read as one column",
+    _indent_for(_opt, _style, window.dev_list, 1) == _boxed_left - _plain_left,
+    str(_indent_for(_opt, _style, window.dev_list, 1)),
+)
+check(
+    "level two goes one step further, because level with is only what a row "
+    "that happened to have no checkbox looks like",
+    _indent_for(_opt, _style, window.dev_list, 2)
+    > _indent_for(_opt, _style, window.dev_list, 1),
+    str(_indent_for(_opt, _style, window.dev_list, 2)),
+)
+check(
+    "and a heading asks for none",
+    _indent_for(_opt, _style, window.dev_list, 0) == 0,
 )
 
 print("\nlocal and dev package sections")
@@ -750,11 +793,11 @@ check(
     window.dev_path_label.text(),
 )
 check("four local packages", window.local_list.count() == 4, str(window.local_list.count()))
-check("eight dev packages", window.dev_list.count() == 8, str(window.dev_list.count()))
+check("eight dev packages", len(dev_rows()) == 8, str(len(dev_rows())))
 check("local badge", window.local_frame.badge.text() == "4 packages", window.local_frame.badge.text())
 check("dev badge", window.dev_frame.badge.text() == "8 packages", window.dev_frame.badge.text())
 local_texts = [window.local_list.item(i).text() for i in range(window.local_list.count())]
-dev_texts = [window.dev_list.item(i).text() for i in range(window.dev_list.count())]
+dev_texts = [i.text() for i in dev_rows()]
 check(
     "the nested dev root is not listed as a local package",
     not any(t.startswith("dev") for t in local_texts),
@@ -769,11 +812,11 @@ from bootycall.ui.main_window import _PACKAGE_NAME_ROLE, _PACKAGE_PATH_ROLE  # n
 
 check(
     "rows carry a path for the menu to act on",
-    all(window.dev_list.item(i).data(_PACKAGE_PATH_ROLE) for i in range(window.dev_list.count())),
+    all(item.data(_PACKAGE_PATH_ROLE) for item in dev_rows()),
 )
 check("both lists offer a context menu", window.dev_list.contextMenuPolicy() == Qt.CustomContextMenu and window.local_list.contextMenuPolicy() == Qt.CustomContextMenu)
 
-row = window.dev_list.item(0)
+row = dev_rows()[0]
 pkgs = window._packages_for_items(window.dev_list, [row])
 check("an item maps back to its package", len(pkgs) == 1 and pkgs[0].request == row.text().split("  ")[0], str(pkgs))
 check(
@@ -790,14 +833,14 @@ scratch = Path("/tmp/ice/rez/packages/local/adrian/dev/deleteme")
 (scratch / "1.0.0" / "package.py").write_text("name = 'deleteme'\n")
 window.refresh_package_lists()
 QApplication.processEvents()
-check("it shows up", window.dev_list.count() == 9, str(window.dev_list.count()))
+check("it shows up", len(dev_rows()) == 9, str(len(dev_rows())))
 
 target = [p for p in window._dev_packages if p.name == "deleteme"]
 errors = window.delete_packages(window.dev_list, target)
 QApplication.processEvents()
 check("no errors", errors == [], str(errors))
 check("gone from disk", not scratch.exists())
-check("and from the list", window.dev_list.count() == 8, str(window.dev_list.count()))
+check("and from the list", len(dev_rows()) == 8, str(len(dev_rows())))
 check(
     "the badge came back down",
     window.dev_frame.badge.text() == "8 packages",
@@ -816,7 +859,7 @@ print("\noverride marking, both roots, houdini vs nuke")
 window._dcc_buttons["houdinicore"].click()
 QApplication.processEvents()
 local_texts = [window.local_list.item(i).text() for i in range(window.local_list.count())]
-dev_texts = [window.dev_list.item(i).text() for i in range(window.dev_list.count())]
+dev_texts = [i.text() for i in dev_rows()]
 check(
     "local houdini_utils marked",
     any(t.startswith("houdini_utils") and "overrides houdini_utils-6" in t for t in local_texts),
@@ -848,7 +891,7 @@ check(
 window._dcc_buttons["nuke"].click()
 QApplication.processEvents()
 local_texts = [window.local_list.item(i).text() for i in range(window.local_list.count())]
-dev_texts = [window.dev_list.item(i).text() for i in range(window.dev_list.count())]
+dev_texts = [i.text() for i in dev_rows()]
 check(
     "dev nuke_utils marked under nuke",
     any(t.startswith("nuke_utils") and "overrides nuke_utils-4" in t for t in dev_texts),
@@ -903,7 +946,7 @@ check(
 )
 check("and greys its list", not window.dev_list.isEnabled())
 check("the header says so", window.dev_frame.note.text() == "not used", window.dev_frame.note.text())
-dev_texts = [window.dev_list.item(i).text() for i in range(window.dev_list.count())]
+dev_texts = [i.text() for i in dev_rows()]
 check(
     "a switched-off section stops claiming to override anything",
     not any("overrides" in t for t in dev_texts),
@@ -1022,7 +1065,7 @@ shot(window, "12-both-open")
 
 print("\nfewer overrides for a leaner show")
 pin("finishing_only")
-dev_texts = [window.dev_list.item(i).text() for i in range(window.dev_list.count())]
+dev_texts = [i.text() for i in dev_rows()]
 check("no dev overrides", not any("overrides" in t for t in dev_texts), str(dev_texts))
 check("dev note cleared", window.dev_frame.note.text() == "", window.dev_frame.note.text())
 
@@ -1066,7 +1109,7 @@ mw_mod.current_user = lp_mod.current_user
 mw_mod.list_local_packages = lp_mod.list_local_packages
 window.refresh_package_lists()
 QApplication.processEvents()
-check("restored", window.local_list.count() == 4 and window.dev_list.count() == 8)
+check("restored", window.local_list.count() == 4 and len(dev_rows()) == 8)
 
 window.resolve_frame.set_expanded(False)
 window.local_frame.set_expanded(False)
@@ -2102,15 +2145,11 @@ check("there are dev packages to tick", bool(_dev_names), str(_dev_names))
 from bootycall.ui.package_delegate import INDENT_ROLE as _INDENT  # noqa: E402
 
 
-def _dev_rows():
-    return [window.dev_list.item(i) for i in range(window.dev_list.count())]
-
-
 def _boxed():
     """The rows that actually carry a box, by name."""
     return {
         item.data(_NAME_ROLE): item
-        for item in _dev_rows()
+        for item in dev_rows()
         if item.data(_NAME_ROLE) and item.data(Qt.CheckStateRole) is not None
     }
 
@@ -2119,14 +2158,14 @@ def _boxed():
 # satisfies the request, so ticking 4.9.0 while 4.10.0 sits beside it would
 # resolve to 4.10.0 anyway -- three boxes for one decision said otherwise.
 _boxes = [
-    item for item in _dev_rows()
+    item for item in dev_rows()
     if item.data(_NAME_ROLE) and item.data(Qt.CheckStateRole) is not None
 ]
 check(
     "one checkbox per package name, not one per build",
     len(_boxes) == len({item.data(_NAME_ROLE) for item in _boxes})
     == len(set(_dev_names)),
-    str([(i.text(), i.data(Qt.CheckStateRole) is not None) for i in _dev_rows()]),
+    str([(i.text(), i.data(Qt.CheckStateRole) is not None) for i in dev_rows()]),
 )
 check(
     "and it sits on the build rez would use, beside the words that say so",
@@ -2134,14 +2173,21 @@ check(
     _boxed()["nuke_utils"].text(),
 )
 check(
+    "overriding packages are lifted to the top of their group, not out of it: "
+    "a row above the heading would be filed under nothing",
+    window.dev_list.item(0).data(mw_mod._HEADER_ROLE)
+    and window.dev_list.item(1).data(_NAME_ROLE) == "nuke_utils",
+    str([window.dev_list.item(i).text() for i in range(window.dev_list.count())]),
+)
+check(
     "the builds it beat keep their row, indented, with nothing to tick",
     all(
         item.data(Qt.CheckStateRole) is None and item.data(_INDENT)
-        for item in _dev_rows()
+        for item in dev_rows()
         if item.data(_NAME_ROLE) == "nuke_utils"
         and item is not _boxed()["nuke_utils"]
     ),
-    str([i.text() for i in _dev_rows() if i.data(_NAME_ROLE) == "nuke_utils"]),
+    str([i.text() for i in dev_rows() if i.data(_NAME_ROLE) == "nuke_utils"]),
 )
 # One question behind the box -- is this package in the environment -- with two
 # defaults, because the two kinds of package start in different places.
@@ -2183,7 +2229,7 @@ print("\nthe dev list can be filtered by name")
 
 
 def _visible():
-    return [i.text() for i in _dev_rows() if not i.isHidden()]
+    return [i.text() for i in dev_rows() if not i.isHidden()]
 
 
 window.dev_filter.setText("nuke")
@@ -2195,10 +2241,10 @@ check(
 )
 check(
     "hiding a row does not remove it: the list still knows what is installed",
-    len(_dev_rows()) == len(_dev_names) + len(
-        [i for i in _dev_rows() if not i.data(_NAME_ROLE)]
+    len(dev_rows()) == len(_dev_names) + len(
+        [i for i in dev_rows() if not i.data(_NAME_ROLE)]
     ),
-    str(len(_dev_rows())),
+    str(len(dev_rows())),
 )
 window.dev_filter.setText("4.10")
 QApplication.processEvents()
@@ -2220,7 +2266,7 @@ window.dev_filter.clear()
 QApplication.processEvents()
 check(
     "clearing it brings everything back",
-    len(_visible()) == len(_dev_rows()),
+    len(_visible()) == len(dev_rows()),
     str(len(_visible())),
 )
 check("and the field stops complaining", not window.dev_filter.property("state"))
@@ -2238,7 +2284,7 @@ window.dev_filter.clear()
 QApplication.processEvents()
 
 _first = _dev_names[0]
-window.dev_list.item(0).setCheckState(Qt.Unchecked)
+dev_rows()[0].setCheckState(Qt.Unchecked)
 QApplication.processEvents()
 check("unticking one records it", window._disabled_dev == {_first}, str(window._disabled_dev))
 check(
@@ -2435,7 +2481,7 @@ check(
     str([p.name for p in _view.iterdir()]),
 )
 
-window.dev_list.item(0).setCheckState(Qt.Checked)
+dev_rows()[0].setCheckState(Qt.Checked)
 QApplication.processEvents()
 check("re-ticking clears it", window._disabled_dev == set(), str(window._disabled_dev))
 check("no view needed when nothing is off", window._dev_view_root() is None)
@@ -2487,15 +2533,21 @@ cfg_mod.set_path_overrides(
 window.refresh_package_lists()
 QApplication.processEvents()
 
-_rows = [window.dev_list.item(i) for i in range(window.dev_list.count())]
+_rows = dev_rows()
 _texts = [r.text() for r in _rows]
 check(
     "everything in the working location is shown, installed or not",
-    sorted(_texts) == sorted(
-        ["half_done  (not installed)", "just_notes  (not installed)",
-         "shot_tools  (not installed)"]
-    ),
+    sorted(_texts) == ["half_done", "just_notes", "shot_tools"],
     str(_texts),
+)
+check(
+    "under a heading that says so, rather than each row ending in the answer",
+    [
+        window.dev_list.item(i).text()
+        for i in range(window.dev_list.count())
+        if window.dev_list.item(i).data(mw_mod._HEADER_ROLE)
+    ] == ["Not installed"],
+    str([window.dev_list.item(i).text() for i in range(window.dev_list.count())]),
 )
 check(
     "an uninstalled row carries no package name - nothing here resolves",
@@ -2512,12 +2564,15 @@ check(
     == ["half_done", "just_notes", "shot_tools"],
 )
 check(
-    "the box is drawn but cannot be ticked",
-    all(
-        r.data(Qt.CheckStateRole) is not None
-        and not (r.flags() & Qt.ItemIsUserCheckable)
-        for r in _rows
-    ),
+    "no box at all - under that heading, one that cannot be ticked would be a "
+    "control offering to do the thing the heading just said it cannot",
+    all(r.data(Qt.CheckStateRole) is None for r in _rows),
+)
+check(
+    "indented to the column the boxed rows put their text in, so the two "
+    "groups read as one list",
+    all(r.data(_INDENT) == 1 for r in _rows),
+    str([r.data(_INDENT) for r in _rows]),
 )
 check(
     "and the badge counts both halves",
@@ -2613,16 +2668,21 @@ check(
     "Install builds it into the dev root",
     (_installed / "shot_tools" / "1.0.0" / "package.py").is_file(),
 )
-_after = [window.dev_list.item(i).text() for i in range(window.dev_list.count())]
+_after = [i.text() for i in dev_rows()]
 check(
     "and the row becomes a real package, ticked",
-    any(t.startswith("shot_tools-1.0.0") and "(not installed)" not in t for t in _after),
+    any(t.startswith("shot_tools-1.0.0") for t in _after),
     str(_after),
 )
 check(
-    "with the two that are still only in the working location behind it",
-    sum("(not installed)" in t for t in _after) == 2,
-    str(_after),
+    "with the two that are still only in the working location behind it, "
+    "under their own heading",
+    [
+        window.dev_list.item(i).text()
+        for i in range(window.dev_list.count())
+        if window.dev_list.item(i).data(mw_mod._HEADER_ROLE)
+    ] == ["Installed", "Not installed"],
+    str([window.dev_list.item(i).text() for i in range(window.dev_list.count())]),
 )
 check(
     "the badge follows",
@@ -2650,8 +2710,7 @@ _renamed_rows = [
 check(
     "an uninstalled checkout is listed by its folder, with what it would build",
     _renamed_rows == [
-        "rig_utils-alembic-properties"
-        "  (rig_utils_alembic_properties-0.3.1)  (not installed)"
+        "rig_utils-alembic-properties  (rig_utils_alembic_properties-0.3.1)"
     ],
     str(_renamed_rows),
 )
@@ -2716,7 +2775,7 @@ cfg_mod.set_path_overrides(
 window.refresh_package_lists()
 QApplication.processEvents()
 
-_wt_rows = [window.dev_list.item(i) for i in range(window.dev_list.count())]
+_wt_rows = dev_rows()
 _wt_texts = [r.text() for r in _wt_rows]
 check(
     "the install and both other worktrees are all listed",
@@ -2756,7 +2815,7 @@ check(
 (_wt_dev / "rig_utils" / "1.8.666" / _di.SOURCE_MARKER).unlink()
 window.refresh_package_lists()
 QApplication.processEvents()
-_wt_rows = [window.dev_list.item(i) for i in range(window.dev_list.count())]
+_wt_rows = dev_rows()
 check(
     "unknown source: every worktree is listed, none is claimed",
     len(_wt_rows) == 4
@@ -3222,7 +3281,7 @@ pin("demo")
 window.dev_frame.set_expanded(True)
 QApplication.processEvents()
 
-_rows = [window.dev_list.item(i).text() for i in range(window.dev_list.count())]
+_rows = [i.text() for i in dev_rows()]
 check("the dev build is listed", any("rig_utils" in r for r in _rows), str(_rows))
 check(
     "and it is not called an override, because it does not win",
@@ -3259,7 +3318,7 @@ unpin_all()
 pin("demo")
 window.dev_frame.set_expanded(True)
 QApplication.processEvents()
-_rows = [window.dev_list.item(i).text() for i in range(window.dev_list.count())]
+_rows = [i.text() for i in dev_rows()]
 check(
     "now it is the override",
     any("overrides rig_utils-1.7" in r for r in _rows),
@@ -3422,14 +3481,14 @@ check(
         "outranked" in window.dev_list.item(i).text()
         for i in range(window.dev_list.count())
     ),
-    str([window.dev_list.item(i).text() for i in range(window.dev_list.count())]),
+    str([i.text() for i in dev_rows()]),
 )
 check(
     "the alert badge is visible when it has something to say",
     window.dev_frame.alert.isVisible(),
 )
 
-_rows = [window.dev_list.item(i).text() for i in range(window.dev_list.count())]
+_rows = [i.text() for i in dev_rows()]
 check(
     "and the rows agree with the header",
     any("anim_bot" in r and "overrides" in r for r in _rows)
@@ -3631,8 +3690,9 @@ if _have_links:
     QApplication.processEvents()
 
     _rows = {
-        window.dev_list.item(i).data(_NAME_ROLE): window.dev_list.item(i)
-        for i in range(window.dev_list.count())
+        item.data(_NAME_ROLE): item
+        for item in dev_rows()
+        if item.data(_NAME_ROLE)
     }
     check("both are listed", set(_rows) == {"rig_utils", "real_one"}, str(list(_rows)))
     check(
@@ -3886,7 +3946,7 @@ check(
         "(rig_utils-1.4.0)" in window.dev_list.item(i).text()
         for i in range(window.dev_list.count())
     ),
-    str([window.dev_list.item(i).text() for i in range(window.dev_list.count())]),
+    str([i.text() for i in dev_rows()]),
 )
 cfg_mod.set_path_overrides({})
 window.refresh_package_lists()
@@ -4127,8 +4187,8 @@ check(
 window.local_frame.set_checked(True)
 window.dev_frame.set_checked(True)
 QApplication.processEvents()
-_first_dev = window.dev_list.item(0).data(_NAME_ROLE)
-window.dev_list.item(0).setCheckState(Qt.Unchecked)
+_first_dev = dev_rows()[0].data(_NAME_ROLE)
+dev_rows()[0].setCheckState(Qt.Unchecked)
 QApplication.processEvents()
 check(
     "unticking one dev package is named, not just counted",
@@ -4138,7 +4198,7 @@ check(
     ),
     str(window.launch_notes()),
 )
-window.dev_list.item(0).setCheckState(Qt.Checked)
+dev_rows()[0].setCheckState(Qt.Checked)
 QApplication.processEvents()
 
 _argv = launcher.build_command(
