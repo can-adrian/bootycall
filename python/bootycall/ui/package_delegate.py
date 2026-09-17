@@ -11,6 +11,12 @@ anything in brackets, which is exactly the set of asides -- ``(symlinked)``,
 ``(not installed)``, ``(older build)``, ``(show package)`` -- and leaves the
 package itself upright.
 
+It also indents the rows marked with :data:`INDENT_ROLE`, which is how a list
+says "this one is subordinate to the one above" -- an older build of a package
+whose newest build carries the decision. Qt draws a row with no checkbox
+further left than one with, so left alone the subordinate rows would stand out
+to the *left* of the row they belong under.
+
 It paints only the text. The checkbox, the selection background and the focus
 rectangle are still drawn by the style, because reimplementing those is how a
 list stops looking like the rest of the application.
@@ -33,6 +39,16 @@ from PySide6.QtWidgets import (
 #: unclosed bracket cannot swallow the rest of the row.
 _BRACKETED = re.compile(r"(\([^()\n]*\))")
 
+#: Set on an item to draw its text indented, under the row it belongs to.
+#: Deliberately far from the roles the window itself hands out, so the two
+#: blocks cannot grow into each other.
+INDENT_ROLE = Qt.UserRole + 20
+
+#: Added on top of the checkbox's width, so an indented row sits *past* the
+#: text above it rather than merely level with it. Level would only look like
+#: a row that happened to have no checkbox.
+_EXTRA_INDENT = 12
+
 
 def runs(text: str) -> list[tuple[str, bool]]:
     """``text`` split into ``(fragment, italic)`` pairs."""
@@ -43,6 +59,25 @@ def runs(text: str) -> list[tuple[str, bool]]:
     ]
 
 
+def indent_for(opt, style, widget) -> int:
+    """How far to shift a subordinate row's text.
+
+    Asked of the style rather than guessed: the same option with a checkbox
+    added says where the text *would* start if this row had one, and the
+    difference is exactly the width the style reserves for it. A number picked
+    by eye here would be right until someone changed the stylesheet.
+    """
+    plain = style.subElementRect(QStyle.SE_ItemViewItemText, opt, widget)
+    boxed = QStyleOptionViewItem(opt)
+    boxed.features |= QStyleOptionViewItem.HasCheckIndicator
+    boxed.checkState = Qt.Unchecked
+    shift = (
+        style.subElementRect(QStyle.SE_ItemViewItemText, boxed, widget).left()
+        - plain.left()
+    )
+    return max(shift, 0) + _EXTRA_INDENT
+
+
 class PackageItemDelegate(QStyledItemDelegate):
     """Draws package rows with their bracketed asides in italic."""
 
@@ -51,7 +86,8 @@ class PackageItemDelegate(QStyledItemDelegate):
         self.initStyleOption(opt, index)
         text = opt.text
         parts = runs(text)
-        if len(parts) < 2:
+        indented = bool(index.data(INDENT_ROLE))
+        if len(parts) < 2 and not indented:
             # Nothing to set apart. Hand it back to Qt rather than repainting
             # it slightly differently by hand.
             super().paint(painter, option, index)
@@ -67,6 +103,10 @@ class PackageItemDelegate(QStyledItemDelegate):
         rect = style.subElementRect(QStyle.SE_ItemViewItemText, opt, widget)
         if rect.isEmpty():
             return
+        if indented:
+            rect.setLeft(rect.left() + indent_for(opt, style, widget))
+            if rect.isEmpty():
+                return
 
         colour = opt.palette.text().color()
         if opt.state & QStyle.State_Selected:

@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
@@ -70,7 +71,7 @@ from ..local_packages import (
 from ..parser import Bootstrap
 from .chips import ShowChipBar
 from .collapsible import CollapsibleFrame
-from .package_delegate import PackageItemDelegate
+from .package_delegate import INDENT_ROLE, PackageItemDelegate
 from .config_menu import ConfigMenuAction
 from .dcc_tile import DccTile
 from .favorites_window import FavoritesWindow
@@ -104,6 +105,11 @@ _BUILT_FROM_ROLE = Qt.UserRole + 3
 #: so the one flag that says "this package reaches no resolve at all" was
 #: painted once and then erased.
 _PROBLEM_ROLE = Qt.UserRole + 4
+#: What the dev filter field matches against: the row as it read before any
+#: override mark was painted on it. Matching the visible text instead would
+#: mean a filter of "over" quietly matching every row that says "overrides",
+#: and changing what it matched every time the resolve changed.
+_FILTER_ROLE = Qt.UserRole + 5
 
 #: Row colours, matching the counts in the section header exactly. A header
 #: that says "2 outranked" in red over two grey rows makes the reader work out
@@ -414,6 +420,7 @@ class MainWindow(QMainWindow):
             self.local_frame,
             self.local_path_label,
             self.local_list,
+            _local_filter,
         ) = self._build_package_section("Local packages")
         self.local_frame.headerMenuRequested.connect(
             lambda point: self._on_section_menu("local", point)
@@ -427,8 +434,9 @@ class MainWindow(QMainWindow):
             self.dev_frame,
             self.dev_path_label,
             self.dev_list,
+            self.dev_filter,
         ) = self._build_package_section(
-            "Dev Packages", expanded=True, show_path=False
+            "Dev Packages", expanded=True, show_path=False, filterable=True
         )
         self.dev_list.itemChanged.connect(self._on_dev_item_changed)
         self.dev_frame.headerMenuRequested.connect(
@@ -489,8 +497,12 @@ class MainWindow(QMainWindow):
         self._apply_frame_stretch()
 
     def _build_package_section(
-        self, title: str, expanded: bool = False, show_path: bool = True
-    ) -> tuple[CollapsibleFrame, QLabel, QListWidget]:
+        self,
+        title: str,
+        expanded: bool = False,
+        show_path: bool = True,
+        filterable: bool = False,
+    ) -> tuple[CollapsibleFrame, QLabel, QListWidget, QLineEdit | None]:
         """One package section: checkbox, header, optional root path, list."""
         frame = CollapsibleFrame(
             title, expanded=expanded, checkable=True, checked=True
@@ -521,8 +533,75 @@ class MainWindow(QMainWindow):
         listing.customContextMenuRequested.connect(
             lambda point, lst=listing: self._on_package_menu(lst, point)
         )
+
+        # A dev root collects checkouts the way a coat pocket collects
+        # receipts, and the one you want is somewhere in the middle of them.
+        # Substring, no wildcards, nothing to learn: type three letters of the
+        # name. Added before the list so it reads as something you do *to* the
+        # list rather than a footnote under it.
+        filter_field = None
+        if filterable:
+            filter_field = QLineEdit()
+            filter_field.setObjectName("filterField")
+            filter_field.setPlaceholderText("Filter by name")
+            filter_field.setClearButtonEnabled(True)
+            filter_field.textChanged.connect(
+                lambda _text, lst=listing: self._apply_filter(lst)
+            )
+            frame.add_widget(filter_field)
+
         frame.add_widget(listing, 1)
-        return frame, path_label, listing
+        return frame, path_label, listing, filter_field
+
+    def _apply_filter(self, listing: QListWidget) -> None:
+        """Hide the rows of ``listing`` that the filter field does not match.
+
+        Hiding, not removing: everything that asks this list what is installed
+        keeps getting the same answer whether or not there is something typed
+        in the box. A filter is a way of looking at the list, not a change to
+        what is in it.
+
+        A name matches as a whole. Type ``4.10`` and the build you meant is
+        shown together with the older ones underneath it, because an indented
+        row on its own, with no row above it and no checkbox, is a puzzle
+        rather than a result.
+        """
+        field = getattr(self, "dev_filter", None) if listing is self.dev_list else None
+        text = (field.text().strip().lower() if field is not None else "")
+
+        wanted: set[str] = set()
+        if text:
+            for row in range(listing.count()):
+                item = listing.item(row)
+                haystack = item.data(_FILTER_ROLE)
+                name = item.data(_PACKAGE_NAME_ROLE)
+                if haystack and name and text in haystack:
+                    wanted.add(name)
+
+        shown = 0
+        for row in range(listing.count()):
+            item = listing.item(row)
+            haystack = item.data(_FILTER_ROLE)
+            if not text or not haystack:
+                # A row with nothing to match on -- the placeholder, or the
+                # line that says the root could not be read -- is not a package
+                # the filter is about, and hiding it would answer a question
+                # nobody asked.
+                item.setHidden(False)
+                shown += 1 if haystack else 0
+                continue
+            hit = text in haystack or item.data(_PACKAGE_NAME_ROLE) in wanted
+            item.setHidden(not hit)
+            shown += 1 if hit else 0
+
+        if field is not None:
+            # Red when it matches nothing, which is the one case where an empty
+            # list means the filter rather than the root.
+            state = "bad" if text and not shown else ""
+            if field.property("state") != state:
+                field.setProperty("state", state)
+                field.style().unpolish(field)
+                field.style().polish(field)
 
     def _build_menu(self) -> None:
         self.file_menu = self.menuBar().addMenu("&File")
@@ -1499,6 +1578,7 @@ class MainWindow(QMainWindow):
         )
         self._add_uninstalled_dev(self.dev_list, self._dev_packages)
         self.dev_list.blockSignals(blocked)
+        self._apply_filter(self.dev_list)
 
         # The resolve list marks overrides, so it has to be redrawn too.
         tool = self._current_tool()
@@ -1586,6 +1666,7 @@ class MainWindow(QMainWindow):
                 label += "  (%s)" % package.request
             item = QListWidgetItem("%s  (not installed)" % label)
             item.setData(_SOURCE_PATH_ROLE, str(package.path))
+            item.setData(_FILTER_ROLE, label.lower())
             item.setForeground(QColor(_ROW_QUIET))
             # The box is drawn but cannot be ticked: enabling a package that
             # is not there would be a lie the resolve then contradicts.
@@ -1669,6 +1750,9 @@ class MainWindow(QMainWindow):
                 if tickable
                 else {}
             )
+            # Rows by package name, in list order, so the checkbox can go on
+            # one row per name once the whole list is built.
+            by_name: dict[str, list[QListWidgetItem]] = {}
             for package in packages:
                 # Two spaces, not the six the override marks use: this belongs
                 # to the package's name, not to what the resolve makes of it,
@@ -1703,6 +1787,7 @@ class MainWindow(QMainWindow):
                 item = QListWidgetItem(display)
                 item.setData(_PACKAGE_NAME_ROLE, package.name)
                 item.setData(_PACKAGE_PATH_ROLE, str(package.path))
+                item.setData(_FILTER_ROLE, display.lower())
                 if built_from is not None and Path(built_from).is_dir():
                     item.setData(_BUILT_FROM_ROLE, str(built_from))
 
@@ -1727,16 +1812,50 @@ class MainWindow(QMainWindow):
                     item.setData(_PROBLEM_ROLE, problem)
 
                 if tickable:
+                    by_name.setdefault(package.name, []).append(item)
+                listing.addItem(item)
+
+            if tickable:
+                self._place_dev_checks(by_name)
+
+        return packages
+
+    def _place_dev_checks(self, by_name: dict) -> None:
+        """One checkbox per dev package name, on the build that wins.
+
+        The tick has always been a per-*name* decision -- rez resolves the
+        highest version that satisfies the request, so ticking 1.0.0 while
+        1.2.0 sits beside it unticked would resolve to 1.2.0 anyway, and the
+        code has kept every row of a name in step since the beginning. Drawing
+        that one decision as three boxes said the opposite: that there were
+        three decisions, and that you could make them differently.
+
+        So the box goes on the row that would actually be used, and the older
+        builds keep their row -- you still want to see them, remove them, set a
+        version on one -- indented under it, with nothing to tick.
+
+        Which row wins is the first one rez could use: the same rule the
+        override pass follows, so the box and the words "overrides ..." land
+        together. When every build of a name is one rez will skip, the first
+        row takes the box regardless, because a name you cannot switch off at
+        all is worse than a box on a row that is going nowhere.
+        """
+        for items in by_name.values():
+            usable = [i for i in items if not i.data(_PROBLEM_ROLE)]
+            winner = usable[0] if usable else items[0]
+            for item in items:
+                if item is winner:
                     # Setting a check state is what puts a box on the row --
                     # ItemIsUserCheckable is already in Qt's default flags, so
                     # setting it would say nothing. A row with no check state
                     # is how the local list stays plain.
                     item.setCheckState(
-                        Qt.Checked if self._dev_is_on(package.name) else Qt.Unchecked
+                        Qt.Checked
+                        if self._dev_is_on(item.data(_PACKAGE_NAME_ROLE))
+                        else Qt.Unchecked
                     )
-                listing.addItem(item)
-
-        return packages
+                else:
+                    item.setData(INDENT_ROLE, True)
 
     def _on_dev_item_changed(self, item: QListWidgetItem) -> None:
         """A dev package was ticked or unticked."""
@@ -1833,6 +1952,12 @@ class MainWindow(QMainWindow):
             item = self.dev_list.item(row)
             name = item.data(_PACKAGE_NAME_ROLE)
             if not name:
+                continue
+            if item.data(Qt.CheckStateRole) is None:
+                # An older build of a name whose newest build carries the box.
+                # ``checkState()`` answers Unchecked for a row that has none,
+                # so the question has to be put to the data: setting a state
+                # here is what would put the extra boxes back.
                 continue
             item.setCheckState(
                 Qt.Checked if self._dev_is_on(name) else Qt.Unchecked
@@ -2319,6 +2444,10 @@ class MainWindow(QMainWindow):
         # One place decides what the boxes say, after the pass that knows which
         # packages this resolve names.
         self._sync_dev_checks()
+        # Overriding packages are lifted to the top, and taking a row out of a
+        # QListWidget to put it back drops the hidden flag with it. Reapplying
+        # is cheaper than trying to carry it through the reorder.
+        self._apply_filter(self.dev_list)
 
     def _refresh_override_marks_locked(self) -> None:
         self._winner_cache = {}

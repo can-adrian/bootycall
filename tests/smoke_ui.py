@@ -713,6 +713,25 @@ check(
     str(_runs("a-1  (oops")),
 )
 
+# The indent is asked of the style, not picked by eye: the same option with a
+# checkbox added says where the text would start if the row had one, and the
+# difference is the width the style reserves for it. A number chosen by hand
+# would be right until someone edited the stylesheet.
+from bootycall.ui.package_delegate import indent_for as _indent_for  # noqa: E402
+from PySide6.QtWidgets import QStyle, QStyleOptionViewItem  # noqa: E402
+
+_opt = QStyleOptionViewItem()
+_opt.rect = window.dev_list.viewport().rect()
+_opt.text = ""
+_style = window.dev_list.style()
+check(
+    "a subordinate row is shifted past where a checkbox would put the text",
+    _indent_for(_opt, _style, window.dev_list)
+    > _style.subElementRect(QStyle.SE_ItemViewItemText, _opt, window.dev_list).left()
+    - _opt.rect.left(),
+    str(_indent_for(_opt, _style, window.dev_list)),
+)
+
 print("\nlocal and dev package sections")
 window.local_frame.set_expanded(True)
 window.dev_frame.set_expanded(True)
@@ -2080,12 +2099,49 @@ _dev_names = [
 ]
 _dev_names = [n for n in _dev_names if n]
 check("there are dev packages to tick", bool(_dev_names), str(_dev_names))
+from bootycall.ui.package_delegate import INDENT_ROLE as _INDENT  # noqa: E402
+
+
+def _dev_rows():
+    return [window.dev_list.item(i) for i in range(window.dev_list.count())]
+
+
+def _boxed():
+    """The rows that actually carry a box, by name."""
+    return {
+        item.data(_NAME_ROLE): item
+        for item in _dev_rows()
+        if item.data(_NAME_ROLE) and item.data(Qt.CheckStateRole) is not None
+    }
+
+
+# One box per name, not one per build. rez resolves the highest version that
+# satisfies the request, so ticking 4.9.0 while 4.10.0 sits beside it would
+# resolve to 4.10.0 anyway -- three boxes for one decision said otherwise.
+_boxes = [
+    item for item in _dev_rows()
+    if item.data(_NAME_ROLE) and item.data(Qt.CheckStateRole) is not None
+]
 check(
-    "every dev row carries a check state, which is what draws the box",
+    "one checkbox per package name, not one per build",
+    len(_boxes) == len({item.data(_NAME_ROLE) for item in _boxes})
+    == len(set(_dev_names)),
+    str([(i.text(), i.data(Qt.CheckStateRole) is not None) for i in _dev_rows()]),
+)
+check(
+    "and it sits on the build rez would use, beside the words that say so",
+    _boxed()["nuke_utils"].text().startswith("nuke_utils-4.10.0"),
+    _boxed()["nuke_utils"].text(),
+)
+check(
+    "the builds it beat keep their row, indented, with nothing to tick",
     all(
-        window.dev_list.item(i).data(Qt.CheckStateRole) is not None
-        for i in range(window.dev_list.count())
+        item.data(Qt.CheckStateRole) is None and item.data(_INDENT)
+        for item in _dev_rows()
+        if item.data(_NAME_ROLE) == "nuke_utils"
+        and item is not _boxed()["nuke_utils"]
     ),
+    str([i.text() for i in _dev_rows() if i.data(_NAME_ROLE) == "nuke_utils"]),
 )
 # One question behind the box -- is this package in the environment -- with two
 # defaults, because the two kinds of package start in different places.
@@ -2093,25 +2149,20 @@ _appendable = {p.name for p in window.appendable()}
 check(
     "a package the show asks for starts ticked: it is in there already",
     all(
-        window.dev_list.item(i).checkState() == Qt.Checked
-        for i in range(window.dev_list.count())
-        if window.dev_list.item(i).data(_NAME_ROLE) not in _appendable
+        item.checkState() == Qt.Checked
+        for name, item in _boxed().items()
+        if name not in _appendable
     ),
-    str(
-        [
-            (window.dev_list.item(i).text(), window.dev_list.item(i).checkState())
-            for i in range(window.dev_list.count())
-        ]
-    ),
+    str([(i.text(), i.checkState()) for i in _boxed().values()]),
 )
 check(
     "and one it does not asks starts unticked: putting every build you have "
     "into every environment is not a default anyone would choose",
     _appendable
     and all(
-        window.dev_list.item(i).checkState() == Qt.Unchecked
-        for i in range(window.dev_list.count())
-        if window.dev_list.item(i).data(_NAME_ROLE) in _appendable
+        item.checkState() == Qt.Unchecked
+        for name, item in _boxed().items()
+        if name in _appendable
     ),
     str(sorted(_appendable)),
 )
@@ -2127,6 +2178,64 @@ check(
         for i in range(window.local_list.count())
     ),
 )
+
+print("\nthe dev list can be filtered by name")
+
+
+def _visible():
+    return [i.text() for i in _dev_rows() if not i.isHidden()]
+
+
+window.dev_filter.setText("nuke")
+QApplication.processEvents()
+check(
+    "typing a name keeps that package and drops the rest",
+    _visible() and all("nuke_utils" in t for t in _visible()),
+    str(_visible()),
+)
+check(
+    "hiding a row does not remove it: the list still knows what is installed",
+    len(_dev_rows()) == len(_dev_names) + len(
+        [i for i in _dev_rows() if not i.data(_NAME_ROLE)]
+    ),
+    str(len(_dev_rows())),
+)
+window.dev_filter.setText("4.10")
+QApplication.processEvents()
+check(
+    "a match on one build shows the whole name, older builds included -- an "
+    "indented row with nothing above it is a puzzle, not a result",
+    len([t for t in _visible() if "nuke_utils" in t]) == 3,
+    str(_visible()),
+)
+window.dev_filter.setText("no_such_package")
+QApplication.processEvents()
+check("a filter that matches nothing shows nothing", _visible() == [], str(_visible()))
+check(
+    "and says so, because an empty list otherwise looks like an empty root",
+    window.dev_filter.property("state") == "bad",
+    str(window.dev_filter.property("state")),
+)
+window.dev_filter.clear()
+QApplication.processEvents()
+check(
+    "clearing it brings everything back",
+    len(_visible()) == len(_dev_rows()),
+    str(len(_visible())),
+)
+check("and the field stops complaining", not window.dev_filter.property("state"))
+check(
+    "the filter survives a refresh, which reorders rows underneath it",
+    (
+        window.dev_filter.setText("nuke"),
+        window.refresh_package_lists(),
+        QApplication.processEvents(),
+        all("nuke_utils" in t for t in _visible()) and bool(_visible()),
+    )[-1],
+    str(_visible()),
+)
+window.dev_filter.clear()
+QApplication.processEvents()
 
 _first = _dev_names[0]
 window.dev_list.item(0).setCheckState(Qt.Unchecked)

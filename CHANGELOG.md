@@ -10,6 +10,34 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.20.3
+
+Patch: one checkbox per dev package, and a filter field over the dev list.
+
+- **One box per name, on the build that wins.** The tick has always been a
+  per-*name* decision — rez resolves the highest version that satisfies the
+  request, so ticking 4.9.0 while 4.10.0 sat beside it unticked would have
+  resolved to 4.10.0 anyway, and the window has kept every row of a name in
+  step since the beginning. Drawing that one decision as three boxes said the
+  opposite: that there were three decisions, and that you could make them
+  differently. The box now sits on the row rez would actually use — the same
+  row that says *overrides …* — and the builds it beat keep their row,
+  indented under it, with nothing to tick. They are still there to be removed,
+  re-installed, or given a version; they just no longer look like choices.
+- The indent is asked of the style rather than picked by eye: the same option
+  with a checkbox added says where the text *would* start if the row had one,
+  and the difference is the width the style reserves for it.
+- **A filter field over the dev list.** Substring, case-insensitive, no
+  wildcards. It matches the row as it read before any override mark was
+  painted on it, so a filter of `over` cannot quietly match every row that
+  says *overrides*, and what it matches does not change with the resolve. A
+  name matches as a whole — type `4.10` and the older builds come with it,
+  because an indented row with nothing above it is a puzzle rather than a
+  result. Rows are hidden, never removed: everything that asks the list what
+  is installed gets the same answer with or without something typed in the
+  box. The field turns red when it matches nothing, which is the one case
+  where an empty list means the filter and not the root.
+
 ## 0.20.2
 
 Patch: five more taglines.
