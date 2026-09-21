@@ -71,7 +71,7 @@ from ..local_packages import (
 from ..parser import Bootstrap
 from .chips import ShowChipBar
 from .collapsible import CollapsibleFrame
-from .package_delegate import INDENT_ROLE, PackageItemDelegate
+from .package_delegate import CELLS_ROLE, INDENT_ROLE, PackageItemDelegate
 from .config_menu import ConfigMenuAction
 from .dcc_tile import DccTile
 from .favorites_window import FavoritesWindow
@@ -114,6 +114,83 @@ _FILTER_ROLE = Qt.UserRole + 5
 #: above -- they are not packages, and every pass that asks a row "which
 #: package are you?" goes on skipping them for exactly that reason.
 _HEADER_ROLE = Qt.UserRole + 6
+#: ``(symlinked)`` or ``(live)``: what kind of install this row is. A fact
+#: about the build on disk rather than a finding about the resolve, so it
+#: survives every repaint of the status column and is written after whatever
+#: that column has to say.
+_KIND_ROLE = Qt.UserRole + 7
+#: The version this row's package declares, which is also the name of its
+#: directory under the package name -- except for an unversioned package,
+#: where it is empty and the directory is the package name itself. Read off
+#: the package rather than off the path, so the one case where the two differ
+#: does not quietly become a version called "scratch_tool".
+_VERSION_ROLE = Qt.UserRole + 8
+
+
+def folder_label(folder: str, package: str) -> str:
+    """What is left of a checkout's folder name once the package is taken off.
+
+    ``rig_utils-alembic`` building ``rig_utils`` is *alembic*: the feature is
+    the part that differs between worktrees, and repeating the package name on
+    every row would make three rows that read alike in the column where they
+    are supposed to differ.
+
+    Hyphens and underscores are treated as the same character, because a
+    package called ``rig_utils_alembic`` is routinely checked out into a
+    folder called ``rig-utils-alembic`` and neither spelling is wrong. A
+    folder that is not the package name plus something is returned whole --
+    guessing which part of it was meant to be the feature would be inventing
+    an answer.
+    """
+    def flat(text: str) -> str:
+        return text.replace("_", "-").lower()
+
+    left, right = flat(folder), flat(package)
+    if left == right:
+        return ""
+    if left.startswith(right) and left[len(right):len(right) + 1] in ("-", "."):
+        return folder[len(package) + 1:]
+    return folder
+
+
+def row_cells(item: QListWidgetItem) -> list[str]:
+    """This row's columns, always four of them."""
+    cells = list(item.data(CELLS_ROLE) or [])
+    while len(cells) < 4:
+        cells.append("")
+    return cells
+
+
+def set_cells(item: QListWidgetItem, cells) -> None:
+    """Put a row in columns, and keep its plain text in step.
+
+    The text still says the whole row, because it is what a tooltip, a test
+    and every other reader of a QListWidgetItem gets. The columns are what is
+    painted.
+    """
+    cells = [str(c) for c in cells]
+    item.setData(CELLS_ROLE, tuple(cells))
+    item.setText("  ".join(c for c in cells if c))
+
+
+def set_row_status(item: QListWidgetItem, status: str) -> None:
+    """Rewrite what this window has to say about a row, and nothing else.
+
+    The override pass used to rebuild the row's text from the part before a
+    six-space separator, which is a parser -- and a parser that ran over its
+    own output, every refresh. A row in columns has somewhere to put the
+    finding instead.
+    """
+    kind = item.data(_KIND_ROLE) or ""
+    cells = item.data(CELLS_ROLE)
+    if cells is not None:
+        set_cells(
+            item,
+            list(cells)[:3] + ["  ".join(p for p in (status, kind) if p)],
+        )
+        return
+    base = item.text().split("      ")[0]
+    item.setText("%s      %s" % (base, status) if status else base)
 
 #: Row colours, matching the counts in the section header exactly. A header
 #: that says "2 outranked" in red over two grey rows makes the reader work out
@@ -309,6 +386,10 @@ class MainWindow(QMainWindow):
         self._hinted = False
         self._disabled_dev: set[str] = set(self.store.disabled_dev_packages())
         self._appended_dev: set[str] = set(self.store.appended_dev_packages())
+        #: Which build of a dev package to offer rez, by version directory.
+        #: Only names you have actually picked for: everything else follows
+        #: the newest build, which is what an unfiltered root would give you.
+        self._chosen_dev: dict[str, str] = dict(self.store.chosen_dev_builds())
         self._preferred_dcc = self.store.selected_dcc()
         self._restore_compact = self.store.compact()
         stored = self.store.visible_software()
@@ -1682,23 +1763,35 @@ class MainWindow(QMainWindow):
             # spelled the way an installed row spells it, because it is the
             # same thing one step earlier. A folder with no package definition
             # in it gets no bracket: there is nothing it would build.
-            label = package.name
-            if package.request and package.request != package.name:
-                # Unless it would only repeat the folder: a package with no
-                # version whose folder is named after it has nothing to add.
-                label += "  (%s)" % package.request
-            item = QListWidgetItem(label)
+            # Same columns as an installed row, because it is the same
+            # package one step earlier: what rez would call it, what version
+            # it declares, and which checkout it is. The folder column is
+            # where one worktree is told from another.
+            shown = package.package_name or package.name
+            item = QListWidgetItem()
+            set_cells(
+                item,
+                [
+                    shown,
+                    package.package_version,
+                    folder_label(package.name, shown),
+                    "",
+                ],
+            )
             item.setData(_SOURCE_PATH_ROLE, str(package.path))
-            item.setData(_FILTER_ROLE, label.lower())
+            item.setData(_FILTER_ROLE, item.text().lower())
             item.setForeground(QColor(_ROW_QUIET))
             # No box at all, not a greyed-out one. Under a heading that says
             # these are not installed, a checkbox that cannot be ticked is a
             # control offering to do the thing the heading just said it
             # cannot. Indented to the same column as the rows that do have
             # one, so the two groups read as one list.
-            item.setData(INDENT_ROLE, 1)
+            item.setData(INDENT_ROLE, True)
             listing.addItem(item)
 
+        delegate = listing.itemDelegate()
+        if hasattr(delegate, "invalidate_columns"):
+            delegate.invalidate_columns()
         self._refresh_dev_badge(listing, installed, missing)
         return missing
 
@@ -1775,9 +1868,6 @@ class MainWindow(QMainWindow):
                 if tickable
                 else {}
             )
-            # Rows by package name, in list order, so the checkbox can go on
-            # one row per name once the whole list is built.
-            by_name: dict[str, list[QListWidgetItem]] = {}
             if tickable:
                 # The dev list is two lists in one -- what rez can see, and
                 # what is sitting in your working location waiting to be built
@@ -1786,10 +1876,6 @@ class MainWindow(QMainWindow):
                 # question the list could have answered once, at the top.
                 self._add_heading(listing, "Installed")
             for package in packages:
-                # Two spaces, not the six the override marks use: this belongs
-                # to the package's name, not to what the resolve makes of it,
-                # and must survive being remarked.
-                display = package.request
                 source = dev_install.source_of(
                     package, sources.get(package.name, ())
                 )
@@ -1802,24 +1888,33 @@ class MainWindow(QMainWindow):
                     if source is not None
                     else dev_install.installed_source(package.path)
                 )
-                if source is not None and (
-                    source.renamed or len(sources.get(package.name, ())) > 1
-                ):
-                    # Only when the folder is spelled differently from the
-                    # package. Repeating a name the row already carries would
-                    # be noise on every other row.
-                    display += "  (%s)" % source.name
+                folder = (
+                    folder_label(source.name, package.name)
+                    if source is not None
+                    else ""
+                )
+                kind = ""
                 if package.is_symlink:
-                    display += "  (symlinked)"
+                    kind = "(symlinked)"
                 elif dev_install.is_live(package.path):
                     # Built once, payload pointing back at the checkout. Reads
                     # like an ordinary install on disk, behaves like a link.
-                    display += "  (live)"
+                    kind = "(live)"
 
-                item = QListWidgetItem(display)
+                item = QListWidgetItem()
+                item.setData(_KIND_ROLE, kind)
+                if tickable:
+                    set_cells(item, [package.name, package.version, folder, kind])
+                else:
+                    item.setText(
+                        package.request + ("  %s" % kind if kind else "")
+                    )
                 item.setData(_PACKAGE_NAME_ROLE, package.name)
                 item.setData(_PACKAGE_PATH_ROLE, str(package.path))
-                item.setData(_FILTER_ROLE, display.lower())
+                item.setData(_VERSION_ROLE, package.version)
+                item.setData(_FILTER_ROLE, ("%s %s %s" % (
+                    package.name, package.version, folder
+                )).lower())
                 if built_from is not None and Path(built_from).is_dir():
                     item.setData(_BUILT_FROM_ROLE, str(built_from))
 
@@ -1839,17 +1934,28 @@ class MainWindow(QMainWindow):
                     if dev_install.variant_blocker(package.path):
                         problem = "variants are not built here - rez will skip it"
                 if problem:
-                    item.setText("%s      %s" % (display, problem))
+                    set_row_status(item, problem)
                     item.setForeground(QColor("#e06c75"))
                     item.setData(_PROBLEM_ROLE, problem)
 
                 if tickable:
-                    by_name.setdefault(package.name, []).append(item)
+                    # Setting a check state is what puts a box on the row --
+                    # ItemIsUserCheckable is already in Qt's default flags, so
+                    # setting it would say nothing. A row with no check state
+                    # is how the local list stays plain.
+                    item.setCheckState(
+                        Qt.Checked
+                        if self._dev_build_is_on(package.name, package.version)
+                        else Qt.Unchecked
+                    )
                 listing.addItem(item)
 
-            if tickable:
-                self._place_dev_checks(by_name)
-
+        delegate = listing.itemDelegate()
+        if hasattr(delegate, "invalidate_columns"):
+            # The columns are measured across the whole list, so they have to
+            # be forgotten when the list changes -- not when a row's status is
+            # rewritten, which happens far more often and moves nothing.
+            delegate.invalidate_columns()
         return packages
 
     def _add_heading(self, listing: QListWidget, text: str) -> QListWidgetItem:
@@ -1873,78 +1979,47 @@ class MainWindow(QMainWindow):
         listing.addItem(item)
         return item
 
-    def _place_dev_checks(self, by_name: dict) -> None:
-        """One checkbox per dev package name, on the build that wins.
-
-        The tick has always been a per-*name* decision -- rez resolves the
-        highest version that satisfies the request, so ticking 1.0.0 while
-        1.2.0 sits beside it unticked would resolve to 1.2.0 anyway, and the
-        code has kept every row of a name in step since the beginning. Drawing
-        that one decision as three boxes said the opposite: that there were
-        three decisions, and that you could make them differently.
-
-        So the box goes on the row that would actually be used, and the older
-        builds keep their row -- you still want to see them, remove them, set a
-        version on one -- indented under it, with nothing to tick.
-
-        Which row wins is the first one rez could use: the same rule the
-        override pass follows, so the box and the words "overrides ..." land
-        together. When every build of a name is one rez will skip, the first
-        row takes the box regardless, because a name you cannot switch off at
-        all is worse than a box on a row that is going nowhere.
-        """
-        for items in by_name.values():
-            usable = [i for i in items if not i.data(_PROBLEM_ROLE)]
-            winner = usable[0] if usable else items[0]
-            for item in items:
-                if item is winner:
-                    # Setting a check state is what puts a box on the row --
-                    # ItemIsUserCheckable is already in Qt's default flags, so
-                    # setting it would say nothing. A row with no check state
-                    # is how the local list stays plain.
-                    item.setCheckState(
-                        Qt.Checked
-                        if self._dev_is_on(item.data(_PACKAGE_NAME_ROLE))
-                        else Qt.Unchecked
-                    )
-                else:
-                    item.setData(INDENT_ROLE, 2)
-
     def _on_dev_item_changed(self, item: QListWidgetItem) -> None:
-        """A dev package was ticked or unticked."""
+        """A dev build was ticked or unticked."""
         name = item.data(_PACKAGE_NAME_ROLE)
         if not name:
             return
 
         on = item.checkState() == Qt.Checked
+        version = item.data(_VERSION_ROLE) or ""
+        builds = self._dev_builds().get(name, ())
 
-        # One checkbox, one meaning: is this dev package in the environment.
-        # What that takes depends on whether the show asks for the package. If
-        # it does, the build is on the path already and the box decides whether
-        # to keep it there. If it does not, no package path can help -- rez
-        # resolves what the request names -- so the box decides whether to add
-        # it to the request list.
+        if on:
+            # One build of a name at a time. Several in one root means rez
+            # takes the highest, so a second tick would not be a second
+            # package -- it would be a box that says "use this one" over a
+            # build the resolve never reaches. Ticking moves the choice.
+            if len(builds) > 1 and version:
+                self._chosen_dev[name] = version
+            else:
+                self._chosen_dev.pop(name, None)
+        # Ticking any build of a name switches the name on; unticking the one
+        # that was ticked switches it off, because there is nothing else to
+        # untick. What that takes depends on whether the show asks for the
+        # package: if it does, the build is on the path already and the box
+        # decides whether to keep it there; if it does not, no package path
+        # can help -- rez resolves what the request names -- so the box
+        # decides whether to add it to the request list.
         if name in {p.name for p in self.appendable()}:
-            if (name in self._appended_dev) == on:
-                return
             if on:
                 self._appended_dev.add(name)
             else:
                 self._appended_dev.discard(name)
-            self._sync_dev_checks()
             error = self.store.set_appended_dev_packages(sorted(self._appended_dev))
         else:
-            if (name in self._disabled_dev) == (not on):
-                return
-            # By name, not by version: the checkbox says "use my build of
-            # this", and having 1.0.0 on while 0.9.0 is off would resolve to
-            # whichever rez picked anyway.
             if on:
                 self._disabled_dev.discard(name)
             else:
                 self._disabled_dev.add(name)
-            self._sync_dev_checks()
             error = self.store.set_disabled_dev_packages(sorted(self._disabled_dev))
+        self._sync_dev_checks()
+        if not error:
+            error = self.store.set_chosen_dev_builds(self._chosen_dev)
         if error:
             self.statusBar().showMessage(error, 8000)
 
@@ -1953,8 +2028,31 @@ class MainWindow(QMainWindow):
         if tool:
             self._show_packages(tool)
 
-    def _dev_is_on(self, name: str) -> bool:
-        """Is this dev package in the environment?
+    def _dev_builds(self) -> dict[str, list[LocalPackage]]:
+        """The installed dev packages grouped by name, newest first."""
+        builds: dict[str, list[LocalPackage]] = {}
+        for package in self._dev_packages:
+            builds.setdefault(package.name, []).append(package)
+        return builds
+
+    def _dev_choice(self, name: str) -> str:
+        """Which build of ``name`` this window will offer rez.
+
+        The stored one when it is still on disk, and otherwise the newest --
+        which is what rez would have picked from an unfiltered root anyway. A
+        choice that outlived the build it named should quietly stop applying,
+        not pin the name to a version that is no longer there.
+        """
+        builds = self._dev_builds().get(name, ())
+        if not builds:
+            return ""
+        picked = self._chosen_dev.get(name, "")
+        if picked and any(p.version == picked for p in builds):
+            return picked
+        return builds[0].version
+
+    def _dev_name_is_on(self, name: str) -> bool:
+        """Is this dev package in the environment at all?
 
         Two defaults behind one question. A package the show asks for is in the
         environment already, so it is on unless you switched it off. One the
@@ -1966,6 +2064,10 @@ class MainWindow(QMainWindow):
             return name in self._appended_dev
         return name not in self._disabled_dev
 
+    def _dev_build_is_on(self, name: str, version: str) -> bool:
+        """Is *this build* the one the environment gets?"""
+        return self._dev_name_is_on(name) and self._dev_choice(name) == version
+
     def _mark_appended(self, listing: QListWidget) -> None:
         """Paint the dev builds this window is adding to the resolve.
 
@@ -1976,19 +2078,24 @@ class MainWindow(QMainWindow):
         """
         added = {request_name(r) for r in self.appended_requests()}
         appendable = {p.name for p in self.appendable()}
+        picked = self._picked_rows(listing)
         for row in range(listing.count()):
             item = listing.item(row)
             name = item.data(_PACKAGE_NAME_ROLE)
             if not name or name not in appendable or item.data(_PROBLEM_ROLE):
                 continue
-            base = item.text().split("      ")[0]
+            if picked.get(name) is not item:
+                # An older build of an appended name is still overridden by
+                # the one that was appended, and that is the more useful
+                # thing to say than repeating the append on every row.
+                continue
             if name in added:
-                item.setText("%s      appended to the environment" % base)
+                set_row_status(item, "appended to the environment")
                 item.setForeground(QColor(_ROW_APPENDED))
             else:
                 # Not in the resolve and not ticked: it is simply not in play,
                 # and saying nothing is the honest amount to say.
-                item.setText(base)
+                set_row_status(item, "")
                 item.setForeground(QColor(_ROW_QUIET))
 
     def _sync_dev_checks(self) -> None:
@@ -2007,13 +2114,15 @@ class MainWindow(QMainWindow):
             if not name:
                 continue
             if item.data(Qt.CheckStateRole) is None:
-                # An older build of a name whose newest build carries the box.
-                # ``checkState()`` answers Unchecked for a row that has none,
-                # so the question has to be put to the data: setting a state
-                # here is what would put the extra boxes back.
+                # A row that never had a box -- a checkout that is not
+                # installed. ``checkState()`` answers Unchecked for one of
+                # those, so the question has to be put to the data: setting a
+                # state here is what would give it a box.
                 continue
             item.setCheckState(
-                Qt.Checked if self._dev_is_on(name) else Qt.Unchecked
+                Qt.Checked
+                if self._dev_build_is_on(name, item.data(_VERSION_ROLE) or "")
+                else Qt.Unchecked
             )
         self.dev_list.blockSignals(blocked)
 
@@ -2502,6 +2611,32 @@ class MainWindow(QMainWindow):
         # is cheaper than trying to carry it through the reorder.
         self._apply_filter(self.dev_list)
 
+    def _picked_rows(self, listing: QListWidget) -> dict:
+        """The one row per name that this root actually offers rez.
+
+        In the dev list that is the ticked build, which is what makes the
+        boxes mean something: ticking 1.11.1 is what puts 1.11.1 in the
+        environment, not a note about it. A name with nothing ticked still
+        has a row that *would* be offered -- the one the resolve would reach
+        for if you switched the name back on -- and that is the row the
+        standby wording belongs on.
+
+        In the local list there is nothing to tick, so it is the first row of
+        each name: the list is newest-first, and rez takes the highest.
+        """
+        picked: dict = {}
+        for row in range(listing.count()):
+            item = listing.item(row)
+            name = item.data(_PACKAGE_NAME_ROLE)
+            if not name or item.data(_PROBLEM_ROLE) or name in picked:
+                continue
+            if listing is not self.dev_list:
+                picked[name] = item
+                continue
+            if (item.data(_VERSION_ROLE) or "") == self._dev_choice(name):
+                picked[name] = item
+        return picked
+
     def _refresh_override_marks_locked(self) -> None:
         self._winner_cache = {}
         tool = self._current_tool()
@@ -2531,11 +2666,13 @@ class MainWindow(QMainWindow):
                 if off:
                     standby = shadowed_requests(off, requests)
 
-            # Each list is newest-first per name, and rez resolves the highest
-            # version that satisfies the request, so only the first entry for a
-            # given name actually wins. Marking all three of someone's
-            # nuke_utils builds would say the opposite of what happens.
-            marked: set[str] = set()
+            # Only one build of a name reaches the environment, and everything
+            # this pass has to say is about that one. In the dev list it is
+            # the build you ticked; in the local list, where there is nothing
+            # to tick, it is the newest, because that is what rez takes from
+            # an unfiltered root. Every other build of the name is overridden
+            # -- by yours, and by nothing more complicated than that.
+            picked = self._picked_rows(listing)
             for row in range(listing.count()):
                 item = listing.item(row)
                 name = item.data(_PACKAGE_NAME_ROLE)
@@ -2547,20 +2684,21 @@ class MainWindow(QMainWindow):
                     # that was never in the running. Its own flag stands.
                     continue
                 shadow = overrides.get(name)
-                base = item.text().split("      ")[0]
-                first = shadow is not None and name not in marked
-                if first:
-                    marked.add(name)
+                first = picked.get(name) is item
 
-                if shadow is not None and shadow.blocked and first:
+                if not first:
+                    # Not the build this root offers. True whether or not the
+                    # resolve mentions the name at all, which is why it does
+                    # not wait to be told about the resolve.
+                    set_row_status(item, "(overridden)")
+                    item.setForeground(QColor(_ROW_QUIET))
+                elif shadow is not None and shadow.blocked:
                     # The resolve names this package, but this build cannot be
                     # the one it gets. Saying "overrides" here is how you end
                     # up staring at a package that is never in the environment.
-                    item.setText(
-                        "%s      does not satisfy %s" % (base, shadow.request)
-                    )
+                    set_row_status(item, "does not satisfy %s" % shadow.request)
                     item.setForeground(QColor(_ROW_LOST))
-                elif shadow is not None and first:
+                elif shadow is not None:
                     winner = self._winner_for(name, shadow.request)
                     mine = winner is None or _winner_is_ours(winner, packages)
 
@@ -2570,38 +2708,35 @@ class MainWindow(QMainWindow):
                         # elsewhere is not overriding anything, and calling it
                         # an override is how you spend an afternoon wondering
                         # why your change is not there.
-                        item.setText(
-                            "%s      outranked by %s"
-                            % (base, winner.version or "another build")
+                        set_row_status(
+                            item,
+                            "outranked by %s"
+                            % (winner.version or "another build"),
                         )
                         item.setForeground(QColor(_ROW_LOST))
                     else:
-                        item.setText("%s      overrides %s" % (base, shadow.request))
+                        set_row_status(item, "(in use)")
                         item.setForeground(QColor(_ROW_IN_USE))
-                elif shadow is not None:
-                    item.setText("%s      (older build)" % base)
-                    item.setForeground(QColor(_ROW_QUIET))
-                elif name in standby and name not in marked:
-                    marked.add(name)
+                elif name in standby:
                     off_shadow = standby[name]
                     # "would": the tick is off, and the empty box beside the
                     # row already says so, so the words spend themselves on
                     # what ticking it would do instead of repeating the state.
                     # A build that cannot satisfy the request still cannot,
                     # switched off or on, so that one keeps the plain wording.
-                    item.setText(
-                        "%s      %s %s"
+                    set_row_status(
+                        item,
+                        "%s %s"
                         % (
-                            base,
                             "does not satisfy"
                             if off_shadow.blocked
                             else "would override",
                             off_shadow.request,
-                        )
+                        ),
                     )
                     item.setForeground(QColor(_ROW_STANDBY))
                 else:
-                    item.setText(base)
+                    set_row_status(item, "")
                     item.setForeground(QColor(_ROW_PLAIN))
 
             if listing is self.dev_list:
@@ -2742,17 +2877,32 @@ class MainWindow(QMainWindow):
     def _dev_view_root(self):
         """The filtered dev root for this launch, or ``None`` for the real one.
 
-        Only built when something is actually switched off, so the common case
-        costs nothing and puts no extra directory on the path.
+        Only built when the real root would give rez something other than what
+        the boxes say -- a package switched off, or a name whose chosen build
+        is not the highest one on disk. The common case costs nothing and puts
+        no extra directory on the path.
         """
-        if not self.dev_frame.is_checked() or not self._disabled_dev:
+        if not self.dev_frame.is_checked():
             return None
         present = {p.name for p in self._dev_packages}
         off = sorted(self._disabled_dev & present)
-        if not off:
+
+        # Only the names where the choice differs from what rez would do by
+        # itself. Linking a name's newest build one level down would be the
+        # same root with more moving parts in it.
+        builds = self._dev_builds()
+        picks = {
+            name: self._dev_choice(name)
+            for name in present
+            if name not in off
+            and len(builds.get(name, ())) > 1
+            and self._dev_choice(name)
+            and self._dev_choice(name) != builds[name][0].version
+        }
+        if not off and not picks:
             return None
 
-        view, error = dev_install.selection_view(dev_root(), off)
+        view, error = dev_install.selection_view(dev_root(), off, chosen=picks)
         if error:
             self.statusBar().showMessage(error, 8000)
             return None
@@ -3135,6 +3285,21 @@ class MainWindow(QMainWindow):
                     )
                 )
 
+        held = self.held_back_builds()
+        if held:
+            # The single most confusing thing this window can do without
+            # saying so. rez reports the version it resolved and has no way to
+            # know a newer one was on disk and deliberately kept out of the
+            # root it was handed -- so an hour later, "why am I not on the
+            # latest?" has no answer anywhere in the session.
+            notes.append(
+                (
+                    "info",
+                    "Not the newest build, by choice: %s"
+                    % ", ".join("%s %s" % pair for pair in held),
+                )
+            )
+
         added = self.appended_requests()
         if added:
             # Not a warning: you asked for it. But the environment is not the
@@ -3158,6 +3323,24 @@ class MainWindow(QMainWindow):
                 )
             )
         return tuple(notes)
+
+    def held_back_builds(self) -> tuple[tuple[str, str], ...]:
+        """Names where the build in play is not the newest one on disk.
+
+        The answer to "why is my newest build not in this?" -- which is a
+        question only this window can answer, because the newest build is
+        somewhere rez was never shown.
+        """
+        if not self.dev_frame.is_checked():
+            return ()
+        held = []
+        for name, builds in sorted(self._dev_builds().items()):
+            if len(builds) < 2 or not self._dev_name_is_on(name):
+                continue
+            picked = self._dev_choice(name)
+            if picked and picked != builds[0].version:
+                held.append((name, picked))
+        return tuple(held)
 
     def missing_from_rez_path(self) -> tuple[str, ...]:
         """Roots in play that rez's own configuration does not list.

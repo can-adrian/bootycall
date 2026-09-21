@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+import shutil
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
@@ -288,6 +289,55 @@ check(
     sorted(p.name for p in view2.iterdir()) == ["nuke_utils"],
     str(sorted(p.name for p in view2.iterdir())),
 )
+
+# Several builds of one name in a root means rez takes the highest, so the
+# way to be given a particular build is a root that holds only that build.
+(INSTALLED / "nuke_utils" / "0.9.0").mkdir(parents=True, exist_ok=True)
+(INSTALLED / "nuke_utils" / "0.9.0" / "package.py").write_text(
+    'name = "nuke_utils"\nversion = "0.9.0"\n'
+)
+picked, error = dev_install.selection_view(
+    INSTALLED, [], view_dir, chosen={"nuke_utils": "0.9.0"}
+)
+check("choosing a build builds a view too", picked is not None, error)
+check(
+    "the chosen name holds only the chosen version",
+    sorted(p.name for p in (picked / "nuke_utils").iterdir()) == ["0.9.0"],
+    str(sorted(p.name for p in (picked / "nuke_utils").iterdir())),
+)
+check(
+    "so that is the one rez reads, not the highest on disk",
+    sorted(
+        p.version for p in list_local_packages(picked, exclude=())
+        if p.name == "nuke_utils"
+    ) == ["0.9.0"],
+    str([(p.name, p.version) for p in list_local_packages(picked, exclude=())]),
+)
+check(
+    "the name directory is real and the version under it is the link, "
+    "because rez reads <root>/<name>/<version>",
+    (picked / "nuke_utils").is_dir()
+    and not (picked / "nuke_utils").is_symlink()
+    and (picked / "nuke_utils" / "0.9.0").is_symlink(),
+)
+check(
+    "a name with no choice is still linked whole",
+    (picked / "anim_tools").is_symlink(),
+)
+check(
+    "nothing is edited or moved: the other build is still on disk",
+    (INSTALLED / "nuke_utils" / "1.0.0" / "package.py").is_file(),
+)
+missing, error = dev_install.selection_view(
+    INSTALLED, [], view_dir, chosen={"nuke_utils": "7.7.7"}
+)
+check(
+    "a choice naming a build that is not there is an error, not a silent "
+    "fallback to whichever one rez would have picked",
+    missing is None and "7.7.7" in error,
+    error,
+)
+shutil.rmtree(INSTALLED / "nuke_utils" / "0.9.0")
 
 everything_off, error = dev_install.selection_view(
     INSTALLED, ["anim_tools", "nuke_utils"], view_dir

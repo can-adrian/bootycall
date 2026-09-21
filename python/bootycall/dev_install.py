@@ -24,7 +24,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence
 
 from . import config
 from .local_packages import (
@@ -896,6 +896,7 @@ def selection_view(
     dev_root_path: Path | str,
     disabled: Sequence[str],
     view: Path | str | None = None,
+    chosen: Mapping[str, str] | None = None,
 ) -> tuple[Path | None, str]:
     """A dev root containing only the packages that are switched on.
 
@@ -910,12 +911,20 @@ def selection_view(
     off has none of that ambiguity: rez looks, does not find it there, and
     carries on to the next root exactly as it would if you had never built it.
 
+    ``chosen`` maps a package name to the one version directory to offer for
+    it. Several builds of a name in one root means rez takes the highest, and
+    the highest is not always the one you are working on -- so the way to be
+    given a particular build is to hand rez a root that contains only that
+    build. Nothing is edited and nothing is moved: the other versions are
+    still on disk, they are just not in the root this launch reads.
+
     Rebuilt from scratch each time rather than patched, because reasoning about
     a stale link is harder than making a new directory.
     """
     source = Path(dev_root_path)
     off = {str(n) for n in disabled}
-    if not off:
+    picks = {str(k): str(v) for k, v in (chosen or {}).items() if v}
+    if not off and not picks:
         return None, ""
 
     target = Path(view) if view is not None else view_root()
@@ -942,8 +951,20 @@ def selection_view(
     for name in names:
         if name in off:
             continue
+        pick = picks.get(name)
         try:
-            (target / name).symlink_to(source / name, target_is_directory=True)
+            if pick:
+                # A real directory holding one link, rather than a link to the
+                # name: rez reads <root>/<name>/<version>, so the way to offer
+                # one version is for the name directory to contain one.
+                if not (source / name / pick).is_dir():
+                    return None, "no %s of %s in %s" % (pick, name, source)
+                (target / name).mkdir()
+                (target / name / pick).symlink_to(
+                    source / name / pick, target_is_directory=True
+                )
+            else:
+                (target / name).symlink_to(source / name, target_is_directory=True)
             linked += 1
         except OSError as exc:
             return None, "could not link %s: %s" % (name, exc)

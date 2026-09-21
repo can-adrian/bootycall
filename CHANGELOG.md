@@ -10,6 +10,44 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.21.0
+
+Minor: the dev list is in columns, and its checkboxes pick which build is
+used. That last part changes what goes on the rez packages path, which is why
+this is a minor rather than a patch.
+
+- **A checkbox on every build, and each one is a real choice.** Ticking
+  `rig_utils 1.11.1` is what puts 1.11.1 in the environment. One at a time per
+  name: several builds of a name in one root means rez takes the highest, so a
+  second tick would be a box saying "use this one" over a build the resolve
+  never reaches. Ticking moves the choice rather than adding to it.
+- **Nothing is edited and nothing is moved to make it happen.** The build you
+  pick is offered by handing rez a root that contains only that build —
+  `selection_view` already did this for a package switched off, and now does
+  it one level deeper, with a real name directory holding a single version
+  link. The other builds stay exactly where they are. This replaces editing
+  version numbers to promote whichever feature you are testing.
+- **The launch says when the build is not the newest.** rez reports the
+  version it resolved and has no way to know a newer one was on disk and
+  deliberately kept out of the root it was handed, so "why am I not on the
+  latest?" had no answer anywhere in the session. Now it does.
+- **Rows are in columns** — name, version, worktree, status — measured once
+  across the list so they line up down it. The status column is the only one
+  that gets rewritten as the resolve changes, which is what finally removes
+  the pass that rebuilt each row's text by splitting its own output on a
+  six-space separator.
+- **The worktree column names the feature, not the package.** `rig_utils-alembic`
+  building `rig_utils` reads as *alembic*: the part that differs between
+  worktrees is the part worth a column. Hyphens and underscores count as the
+  same character, because a checkout of `rig_utils_alembic` routinely lands in
+  `rig-utils-alembic` and neither spelling is wrong.
+- **The winner says `(in use)` and the rest say `(overridden)`**, replacing
+  `overrides <request>` and `(older build)`. `(in use)` matches the wording the
+  section header has always used for its count.
+- **No more indenting.** Every row starts in the same column, which is what
+  lets you read down the versions. A row with no checkbox is still shifted to
+  where a boxed row puts its text — that is alignment, not indentation.
+
 ## 0.20.4
 
 Patch: the dev list is grouped under headings instead of labelling every row.

@@ -17,7 +17,7 @@ import os
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
 
 CONFIG_VERSION = 1
 
@@ -358,6 +358,35 @@ class ConfigStore:
             self._preferences["appended_dev_packages"] = cleaned
         else:
             self._preferences.pop("appended_dev_packages", None)
+        return self.save()
+
+    def chosen_dev_builds(self) -> dict[str, str]:
+        """Which build of each dev package to use, by version directory.
+
+        Only the names you have actually picked a build for are stored. A name
+        that is not here takes the newest build, which is what rez would have
+        done anyway -- storing that would be storing the default, and the
+        default would then stop following the newest build you install.
+        """
+        stored = self._preferences.get("chosen_dev_builds")
+        if not isinstance(stored, dict):
+            return {}
+        return {
+            str(name): str(version)
+            for name, version in stored.items()
+            if str(name).strip() and str(version).strip()
+        }
+
+    def set_chosen_dev_builds(self, chosen: Mapping[str, str]) -> str:
+        cleaned = {
+            str(name).strip(): str(version).strip()
+            for name, version in chosen.items()
+            if str(name).strip() and str(version).strip()
+        }
+        if cleaned:
+            self._preferences["chosen_dev_builds"] = cleaned
+        else:
+            self._preferences.pop("chosen_dev_builds", None)
         return self.save()
 
     def selected_dcc(self) -> str | None:

@@ -739,6 +739,32 @@ check(
 from bootycall.ui.package_delegate import indent_for as _indent_for  # noqa: E402
 from PySide6.QtWidgets import QStyle, QStyleOptionViewItem  # noqa: E402
 
+from bootycall.ui.main_window import folder_label as _folder  # noqa: E402
+
+check(
+    "a worktree is named by what is left when the package name comes off - "
+    "that is the part that differs between them",
+    _folder("rig_utils-alembic", "rig_utils") == "alembic",
+    _folder("rig_utils-alembic", "rig_utils"),
+)
+check(
+    "hyphens and underscores are the same character here, because a checkout "
+    "of rig_utils_alembic routinely lands in rig-utils-alembic",
+    _folder("rig-utils-alembic-properties", "rig_utils_alembic_properties") == "",
+    _folder("rig-utils-alembic-properties", "rig_utils_alembic_properties"),
+)
+check(
+    "a folder named after the package has nothing to add",
+    _folder("rig_utils", "rig_utils") == "",
+    _folder("rig_utils", "rig_utils"),
+)
+check(
+    "and one that is not the package plus something is left whole - guessing "
+    "which part was meant to be the feature would be inventing an answer",
+    _folder("my-checkout", "rig_utils") == "my-checkout",
+    _folder("my-checkout", "rig_utils"),
+)
+
 _opt = QStyleOptionViewItem()
 _opt.rect = window.dev_list.viewport().rect()
 _opt.text = ""
@@ -753,26 +779,15 @@ _boxed_left = _style.subElementRect(
     QStyle.SE_ItemViewItemText, _boxed_opt, window.dev_list
 ).left()
 check(
-    "a checkbox is what makes level one worth measuring at all",
+    "a checkbox is what makes the shift worth measuring at all",
     _boxed_left > _plain_left,
     "%d vs %d" % (_boxed_left, _plain_left),
 )
 check(
-    "level one lands a boxless row's text exactly where a boxed row puts its "
+    "a boxless row's text is shifted to exactly where a boxed row puts its "
     "own, so the two read as one column",
-    _indent_for(_opt, _style, window.dev_list, 1) == _boxed_left - _plain_left,
-    str(_indent_for(_opt, _style, window.dev_list, 1)),
-)
-check(
-    "level two goes one step further, because level with is only what a row "
-    "that happened to have no checkbox looks like",
-    _indent_for(_opt, _style, window.dev_list, 2)
-    > _indent_for(_opt, _style, window.dev_list, 1),
-    str(_indent_for(_opt, _style, window.dev_list, 2)),
-)
-check(
-    "and a heading asks for none",
-    _indent_for(_opt, _style, window.dev_list, 0) == 0,
+    _indent_for(_opt, _style, window.dev_list) == _boxed_left - _plain_left,
+    str(_indent_for(_opt, _style, window.dev_list)),
 )
 
 print("\nlocal and dev package sections")
@@ -803,7 +818,7 @@ check(
     not any(t.startswith("dev") for t in local_texts),
     str(local_texts),
 )
-check("newest nuke_utils first in dev", dev_texts[3].startswith("nuke_utils-4.10.0"), str(dev_texts))
+check("newest nuke_utils first in dev", dev_texts[3].startswith("nuke_utils  4.10.0"), str(dev_texts))
 check("unversioned shown bare", any(t.startswith("scratch_tool") and "-" not in t.split()[0] for t in dev_texts), str(dev_texts))
 shot(window, "11-local-open")
 
@@ -818,7 +833,11 @@ check("both lists offer a context menu", window.dev_list.contextMenuPolicy() == 
 
 row = dev_rows()[0]
 pkgs = window._packages_for_items(window.dev_list, [row])
-check("an item maps back to its package", len(pkgs) == 1 and pkgs[0].request == row.text().split("  ")[0], str(pkgs))
+check(
+    "an item maps back to its package",
+    len(pkgs) == 1 and pkgs[0].name == row.text().split("  ")[0],
+    str(pkgs),
+)
 check(
     "the section behind the list is identified correctly",
     window._section_for(window.dev_list)[2] == "dev"
@@ -862,17 +881,17 @@ local_texts = [window.local_list.item(i).text() for i in range(window.local_list
 dev_texts = [i.text() for i in dev_rows()]
 check(
     "local houdini_utils marked",
-    any(t.startswith("houdini_utils") and "overrides houdini_utils-6" in t for t in local_texts),
+    any(t.startswith("houdini_utils") and "(in use)" in t for t in local_texts),
     str(local_texts),
 )
 check(
     "dev houdini_utils marked too - it is in both roots",
-    any(t.startswith("houdini_utils") and "overrides houdini_utils-6" in t for t in dev_texts),
+    any(t.startswith("houdini_utils") and "(in use)" in t for t in dev_texts),
     str(dev_texts),
 )
 check(
     "axiom not marked (not in houdinicore)",
-    not any(t.startswith("axiom") and "overrides" in t for t in dev_texts),
+    not any(t.startswith("axiom") and "(in use)" in t for t in dev_texts),
     str(dev_texts),
 )
 check("local header note set", "in use" in window.local_frame.note.text(), window.local_frame.note.text())
@@ -894,32 +913,32 @@ local_texts = [window.local_list.item(i).text() for i in range(window.local_list
 dev_texts = [i.text() for i in dev_rows()]
 check(
     "dev nuke_utils marked under nuke",
-    any(t.startswith("nuke_utils") and "overrides nuke_utils-4" in t for t in dev_texts),
+    any(t.startswith("nuke_utils") and "(in use)" in t for t in dev_texts),
     str(dev_texts),
 )
 check(
     "local nuke_plugins marked under nuke",
-    any(t.startswith("nuke_plugins") and "overrides nuke_plugins-" in t for t in local_texts),
+    any(t.startswith("nuke_plugins") and "(in use)" in t for t in local_texts),
     str(local_texts),
 )
 check(
     "houdini_utils no longer marked in either root",
-    not any(t.startswith("houdini_utils") and "overrides" in t for t in local_texts + dev_texts),
+    not any(t.startswith("houdini_utils") and "(in use)" in t for t in local_texts + dev_texts),
     str(local_texts + dev_texts),
 )
 check(
     "only the highest dev version is marked as winning",
-    len([t for t in dev_texts if "overrides" in t]) == 1,
+    len([t for t in dev_texts if "(in use)" in t]) == 1,
     str([t for t in dev_texts if "nuke_utils" in t]),
 )
 check(
     "the newest one is the marked one",
-    any(t.startswith("nuke_utils-4.10.0") and "overrides" in t for t in dev_texts),
+    any(t.startswith("nuke_utils  4.10.0") and "(in use)" in t for t in dev_texts),
     str([t for t in dev_texts if "nuke_utils" in t]),
 )
 check(
     "older builds labelled as such, not as winners",
-    len([t for t in dev_texts if "older build" in t]) == 2,
+    len([t for t in dev_texts if "(overridden)" in t]) == 2,
     str([t for t in dev_texts if "nuke_utils" in t]),
 )
 
@@ -2142,35 +2161,63 @@ _dev_names = [
 ]
 _dev_names = [n for n in _dev_names if n]
 check("there are dev packages to tick", bool(_dev_names), str(_dev_names))
-from bootycall.ui.package_delegate import INDENT_ROLE as _INDENT  # noqa: E402
+from bootycall.ui.package_delegate import (  # noqa: E402
+    CELLS_ROLE as _CELLS,
+    INDENT_ROLE as _INDENT,
+)
 
 
 def _boxed():
-    """The rows that actually carry a box, by name."""
+    """The rows carrying a tick, by name."""
     return {
         item.data(_NAME_ROLE): item
         for item in dev_rows()
-        if item.data(_NAME_ROLE) and item.data(Qt.CheckStateRole) is not None
+        if item.data(_NAME_ROLE) and item.checkState() == Qt.Checked
     }
 
 
-# One box per name, not one per build. rez resolves the highest version that
-# satisfies the request, so ticking 4.9.0 while 4.10.0 sits beside it would
-# resolve to 4.10.0 anyway -- three boxes for one decision said otherwise.
-_boxes = [
-    item for item in dev_rows()
-    if item.data(_NAME_ROLE) and item.data(Qt.CheckStateRole) is not None
-]
+# A box on every build, and each one is a real choice: ticking 4.9.0 is what
+# puts 4.9.0 in the environment. One at a time per name, because several
+# builds of a name in one root means rez takes the highest -- a second tick
+# would be a box saying "use this one" over a build the resolve never reaches.
 check(
-    "one checkbox per package name, not one per build",
-    len(_boxes) == len({item.data(_NAME_ROLE) for item in _boxes})
-    == len(set(_dev_names)),
+    "every installed build carries a box",
+    all(
+        item.data(Qt.CheckStateRole) is not None
+        for item in dev_rows()
+        if item.data(_NAME_ROLE)
+    ),
     str([(i.text(), i.data(Qt.CheckStateRole) is not None) for i in dev_rows()]),
 )
+_nuke_rows = [i for i in dev_rows() if i.data(_NAME_ROLE) == "nuke_utils"]
+check("there are three builds of nuke_utils", len(_nuke_rows) == 3, str(len(_nuke_rows)))
 check(
-    "and it sits on the build rez would use, beside the words that say so",
-    _boxed()["nuke_utils"].text().startswith("nuke_utils-4.10.0"),
+    "exactly one of them is ticked",
+    len([i for i in _nuke_rows if i.checkState() == Qt.Checked]) == 1,
+    str([(i.text(), i.checkState()) for i in _nuke_rows]),
+)
+check(
+    "and it is the newest, which is what an unfiltered root would have given "
+    "you anyway",
+    _boxed()["nuke_utils"].text().startswith("nuke_utils  4.10.0"),
     _boxed()["nuke_utils"].text(),
+)
+check(
+    "the ticked build says it is in use and the others say what beat them",
+    [i.text().split("  ")[-1] for i in _nuke_rows]
+    == ["(in use)", "(overridden)", "(overridden)"],
+    str([i.text() for i in _nuke_rows]),
+)
+check(
+    "nothing is indented: every row starts in the same column, which is what "
+    "lets you read down the versions",
+    not any(i.data(_INDENT) for i in _nuke_rows),
+    str([i.data(_INDENT) for i in _nuke_rows]),
+)
+check(
+    "and every row is in columns, so name, version and folder line up",
+    all(len(i.data(_CELLS)) == 4 for i in _nuke_rows),
+    str([i.data(_CELLS) for i in _nuke_rows]),
 )
 check(
     "overriding packages are lifted to the top of their group, not out of it: "
@@ -2179,16 +2226,55 @@ check(
     and window.dev_list.item(1).data(_NAME_ROLE) == "nuke_utils",
     str([window.dev_list.item(i).text() for i in range(window.dev_list.count())]),
 )
+
+# Ticking an older build moves the choice rather than adding a second one.
+_nuke_rows[1].setCheckState(Qt.Checked)
+QApplication.processEvents()
+_nuke_rows = [i for i in dev_rows() if i.data(_NAME_ROLE) == "nuke_utils"]
 check(
-    "the builds it beat keep their row, indented, with nothing to tick",
-    all(
-        item.data(Qt.CheckStateRole) is None and item.data(_INDENT)
-        for item in dev_rows()
-        if item.data(_NAME_ROLE) == "nuke_utils"
-        and item is not _boxed()["nuke_utils"]
-    ),
-    str([i.text() for i in dev_rows() if i.data(_NAME_ROLE) == "nuke_utils"]),
+    "ticking an older build moves the tick off the newer one",
+    [i.checkState() == Qt.Checked for i in _nuke_rows] == [False, True, False],
+    str([(i.text(), i.checkState()) for i in _nuke_rows]),
 )
+check(
+    "and the rows swap what they say about themselves",
+    [i.text().split("  ")[-1] for i in _nuke_rows]
+    == ["(overridden)", "(in use)", "(overridden)"],
+    str([i.text() for i in _nuke_rows]),
+)
+check(
+    "the choice is remembered",
+    window.store.chosen_dev_builds().get("nuke_utils") == "4.9.0",
+    str(window.store.chosen_dev_builds()),
+)
+# The whole point: rez is handed a root containing only that build, rather
+# than the version numbers being edited to make it win.
+_view = window._dev_view_root()
+check("a filtered root is built for it", _view is not None, str(_view))
+if _view is not None:
+    check(
+        "and it offers exactly the build that was ticked",
+        sorted(p.name for p in (_view / "nuke_utils").iterdir()) == ["4.9.0"],
+        str(sorted(p.name for p in (_view / "nuke_utils").iterdir())),
+    )
+check(
+    "and the launch says so, because rez cannot: it reports what it resolved "
+    "and never sees the newer build that was kept out of the root",
+    ("nuke_utils", "4.9.0") in window.held_back_builds()
+    and any(
+        "Not the newest build" in text for _level, text in window.launch_notes()
+    ),
+    str(window.launch_notes()),
+)
+_nuke_rows[0].setCheckState(Qt.Checked)
+QApplication.processEvents()
+check(
+    "ticking the newest again stops the root needing to be filtered at all",
+    window._dev_view_root() is None,
+    str(window._dev_view_root()),
+)
+check("and the note goes with it", window.held_back_builds() == ())
+
 # One question behind the box -- is this package in the environment -- with two
 # defaults, because the two kinds of package start in different places.
 _appendable = {p.name for p in window.appendable()}
@@ -2671,7 +2757,7 @@ check(
 _after = [i.text() for i in dev_rows()]
 check(
     "and the row becomes a real package, ticked",
-    any(t.startswith("shot_tools-1.0.0") for t in _after),
+    any(t.startswith("shot_tools  1.0.0") for t in _after),
     str(_after),
 )
 check(
@@ -2704,14 +2790,14 @@ _renamed_rows = [
     for i in range(window.dev_list.count())
     if "rig_utils" in window.dev_list.item(i).text()
 ]
-# The folder leads: it is what tells one worktree from another, and naming
-# them all after the package they share would make rows that read alike. The
-# bracket is what rez would call what the checkout builds.
+# What rez would call it leads, because that is the column every other row
+# puts its name in. The folder column is empty here: hyphens and underscores
+# are the same character for this purpose, so rig_utils-alembic-properties is
+# the package name spelled differently rather than a feature of its own, and
+# repeating it would be saying the same thing twice on one row.
 check(
-    "an uninstalled checkout is listed by its folder, with what it would build",
-    _renamed_rows == [
-        "rig_utils-alembic-properties  (rig_utils_alembic_properties-0.3.1)"
-    ],
+    "an uninstalled checkout is listed by what it would build",
+    _renamed_rows == ["rig_utils_alembic_properties  0.3.1"],
     str(_renamed_rows),
 )
 
@@ -2741,9 +2827,9 @@ check(
     str([r.text() for r in _renamed_rows]),
 )
 check(
-    "and it still names the folder it was built from",
-    _renamed_rows[0].text()
-    == "rig_utils_alembic_properties-0.3.1  (rig_utils-alembic-properties)",
+    "and it still knows the folder it was built from, even where the folder "
+    "column has nothing to add",
+    _renamed_rows[0].text() == "rig_utils_alembic_properties  0.3.1",
     _renamed_rows[0].text(),
 )
 check(
@@ -2783,9 +2869,11 @@ check(
     str(_wt_texts),
 )
 check(
-    "the installed row names the worktree it actually came from",
+    "the installed row names the worktree it actually came from, without "
+    "repeating the package name it shares with the other two",
     any(
-        r.data(_NAME_ROLE) == "rig_utils" and "(rig_utils-alembic)" in r.text()
+        r.data(_NAME_ROLE) == "rig_utils"
+        and r.data(_CELLS)[2] == "alembic"
         for r in _wt_rows
     ),
     str(_wt_texts),
@@ -3321,7 +3409,7 @@ QApplication.processEvents()
 _rows = [i.text() for i in dev_rows()]
 check(
     "now it is the override",
-    any("overrides rig_utils-1.7" in r for r in _rows),
+    any("rig_utils" in r and "(in use)" in r for r in _rows),
     str(_rows),
 )
 
@@ -3491,7 +3579,7 @@ check(
 _rows = [i.text() for i in dev_rows()]
 check(
     "and the rows agree with the header",
-    any("anim_bot" in r and "overrides" in r for r in _rows)
+    any("anim_bot" in r and "(in use)" in r for r in _rows)
     and any("rig_utils" in r and "outranked" in r for r in _rows),
     str(_rows),
 )
@@ -3892,20 +3980,20 @@ def _menu_for(match):
     return list(_edit_labels)
 
 
-_checkout_menu = _menu_for("rig_utils-alembic")
+_checkout_menu = _menu_for("alembic")
 check(
     "a checkout offers it - that file is source",
     "Set version..." in _checkout_menu,
     str(_checkout_menu),
 )
-_built_menu = _menu_for("built-2.0.0")
+_built_menu = _menu_for("built  2.0.0")
 check(
     "an installed package does not - its definition is build output, and the "
     "version it declares would stop matching the directory it sits in",
     "Set version..." not in _built_menu,
     str(_built_menu),
 )
-_linked_menu = _menu_for("linked-3.0.0")
+_linked_menu = _menu_for("linked  3.0.0")
 check(
     "nor a linked one, which is read through the link",
     "Set version..." not in _linked_menu,
@@ -3943,8 +4031,8 @@ QApplication.processEvents()
 check(
     "and the row followed it",
     any(
-        "(rig_utils-1.4.0)" in window.dev_list.item(i).text()
-        for i in range(window.dev_list.count())
+        i.data(_CELLS) and tuple(i.data(_CELLS))[:3] == ("rig_utils", "1.4.0", "alembic")
+        for i in dev_rows()
     ),
     str([i.text() for i in dev_rows()]),
 )
