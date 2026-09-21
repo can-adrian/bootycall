@@ -740,6 +740,25 @@ from bootycall.ui.package_delegate import indent_for as _indent_for  # noqa: E40
 from PySide6.QtWidgets import QStyle, QStyleOptionViewItem  # noqa: E402
 
 from bootycall.ui.main_window import folder_label as _folder  # noqa: E402
+from bootycall.ui.main_window import row_label as _label  # noqa: E402
+
+check(
+    "a row is spelled the way the disk spells it, not as three fields that "
+    "happen to be near each other",
+    _label(["rig_utils", "1.7.8", "archive-atom-files"])
+    == "rig_utils-1.7.8-archive-atom-files",
+    _label(["rig_utils", "1.7.8", "archive-atom-files"]),
+)
+check(
+    "an unversioned package does not grow an empty joint",
+    _label(["scratch_tool", "", ""]) == "scratch_tool",
+    _label(["scratch_tool", "", ""]),
+)
+check(
+    "nor does one with no worktree to name",
+    _label(["axiom", "3.1.0", ""]) == "axiom-3.1.0",
+    _label(["axiom", "3.1.0", ""]),
+)
 
 check(
     "a worktree is named by what is left when the package name comes off - "
@@ -818,7 +837,7 @@ check(
     not any(t.startswith("dev") for t in local_texts),
     str(local_texts),
 )
-check("newest nuke_utils first in dev", dev_texts[3].startswith("nuke_utils  4.10.0"), str(dev_texts))
+check("newest nuke_utils first in dev", dev_texts[3].startswith("nuke_utils-4.10.0"), str(dev_texts))
 check("unversioned shown bare", any(t.startswith("scratch_tool") and "-" not in t.split()[0] for t in dev_texts), str(dev_texts))
 shot(window, "11-local-open")
 
@@ -835,7 +854,7 @@ row = dev_rows()[0]
 pkgs = window._packages_for_items(window.dev_list, [row])
 check(
     "an item maps back to its package",
-    len(pkgs) == 1 and pkgs[0].name == row.text().split("  ")[0],
+    len(pkgs) == 1 and pkgs[0].request == row.text().split("  ")[0],
     str(pkgs),
 )
 check(
@@ -933,7 +952,7 @@ check(
 )
 check(
     "the newest one is the marked one",
-    any(t.startswith("nuke_utils  4.10.0") and "(in use)" in t for t in dev_texts),
+    any(t.startswith("nuke_utils-4.10.0") and "(in use)" in t for t in dev_texts),
     str([t for t in dev_texts if "nuke_utils" in t]),
 )
 check(
@@ -2199,7 +2218,7 @@ check(
 check(
     "and it is the newest, which is what an unfiltered root would have given "
     "you anyway",
-    _boxed()["nuke_utils"].text().startswith("nuke_utils  4.10.0"),
+    _boxed()["nuke_utils"].text().startswith("nuke_utils-4.10.0"),
     _boxed()["nuke_utils"].text(),
 )
 check(
@@ -2218,9 +2237,9 @@ check(
     "padding a gap into the middle of every row",
     [i.text() for i in _nuke_rows]
     == [
-        "nuke_utils  4.10.0    (in use)",
-        "nuke_utils  4.9.0    (overridden)",
-        "nuke_utils  4.2.1    (overridden)",
+        "nuke_utils-4.10.0    (in use)",
+        "nuke_utils-4.9.0    (overridden)",
+        "nuke_utils-4.2.1    (overridden)",
     ],
     str([i.text() for i in _nuke_rows]),
 )
@@ -2342,6 +2361,13 @@ check(
         [i for i in dev_rows() if not i.data(_NAME_ROLE)]
     ),
     str(len(dev_rows())),
+)
+window.dev_filter.setText("utils-4.10")
+QApplication.processEvents()
+check(
+    "the filter matches the row as it is spelled on screen, hyphens and all",
+    [t for t in _visible() if "nuke_utils" in t],
+    str(_visible()),
 )
 window.dev_filter.setText("4.10")
 QApplication.processEvents()
@@ -2768,7 +2794,7 @@ check(
 _after = [i.text() for i in dev_rows()]
 check(
     "and the row becomes a real package, ticked",
-    any(t.startswith("shot_tools  1.0.0") for t in _after),
+    any(t.startswith("shot_tools-1.0.0") for t in _after),
     str(_after),
 )
 check(
@@ -2808,7 +2834,7 @@ _renamed_rows = [
 # would be saying the same thing twice on one row.
 check(
     "an uninstalled checkout is listed by what it would build",
-    _renamed_rows == ["rig_utils_alembic_properties  0.3.1"],
+    _renamed_rows == ["rig_utils_alembic_properties-0.3.1"],
     str(_renamed_rows),
 )
 
@@ -2840,7 +2866,7 @@ check(
 check(
     "and it still knows the folder it was built from, even where the folder "
     "column has nothing to add",
-    _renamed_rows[0].text() == "rig_utils_alembic_properties  0.3.1",
+    _renamed_rows[0].text() == "rig_utils_alembic_properties-0.3.1",
     _renamed_rows[0].text(),
 )
 check(
@@ -3997,14 +4023,14 @@ check(
     "Set version..." in _checkout_menu,
     str(_checkout_menu),
 )
-_built_menu = _menu_for("built  2.0.0")
+_built_menu = _menu_for("built-2.0.0")
 check(
     "an installed package does not - its definition is build output, and the "
     "version it declares would stop matching the directory it sits in",
     "Set version..." not in _built_menu,
     str(_built_menu),
 )
-_linked_menu = _menu_for("linked  3.0.0")
+_linked_menu = _menu_for("linked-3.0.0")
 check(
     "nor a linked one, which is read through the link",
     "Set version..." not in _linked_menu,

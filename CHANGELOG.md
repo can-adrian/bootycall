@@ -10,6 +10,20 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.21.2
+
+Patch: dev rows are spelled the way the disk spells them.
+
+- `rig_utils-1.7.8-archive-atom-files`, not `rig_utils 1.7.8
+  archive-atom-files`. The first two parts are already how you would write the
+  package in a rez request and the third is the tail of the folder the
+  checkout sits in, so hyphenated the row reads as one thing you could go and
+  look at rather than three fields that happen to be near each other.
+- The status keeps its wide gap. It is the one part of the row that is not on
+  disk, and running it into the name with a hyphen would say it was.
+- The filter matches what is on screen, so `utils-4.9` finds the row that
+  reads `nuke_utils-4.9.0`.
+
 ## 0.21.1
 
 Patch: the dev rows run left, not in aligned columns.

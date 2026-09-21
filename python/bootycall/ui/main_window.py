@@ -161,6 +161,18 @@ def row_cells(item: QListWidgetItem) -> list[str]:
     return cells
 
 
+def row_label(cells) -> str:
+    """Name, version and worktree, spelled the way the disk spells them.
+
+    ``rig_utils-1.7.8-archive-atom-files``, not ``rig_utils 1.7.8
+    archive-atom-files``. The first two are already how you would write the
+    package in a rez request, and the third is the tail of the folder the
+    checkout sits in -- so hyphenated the row reads as one thing you could go
+    and look at, rather than three fields that happen to be near each other.
+    """
+    return "-".join(str(c) for c in list(cells)[:3] if c)
+
+
 def set_cells(item: QListWidgetItem, cells) -> None:
     """Write a row's parts, and the text that is drawn from them.
 
@@ -169,14 +181,14 @@ def set_cells(item: QListWidgetItem, cells) -> None:
     spacing lives here and nowhere else -- what the row says and what it looks
     like cannot drift apart if there is only one of them.
 
-    A wider gap before the status, because that part is the window talking
-    rather than the package, and the eye needs somewhere to stop.
+    A wide gap before the status, because that part is the window talking
+    rather than the package: it is the one part of the row that is not on
+    disk, and running it into the name with a hyphen would say it was.
     """
     cells = [str(c) for c in cells]
-    head = "  ".join(c for c in cells[:3] if c)
     status = cells[3] if len(cells) > 3 else ""
     item.setData(CELLS_ROLE, tuple(cells))
-    item.setText(head + ("    " + status if status else ""))
+    item.setText(row_label(cells) + ("    " + status if status else ""))
 
 
 def set_row_status(item: QListWidgetItem, status: str) -> None:
@@ -1786,6 +1798,7 @@ class MainWindow(QMainWindow):
             )
             item.setData(_SOURCE_PATH_ROLE, str(package.path))
             item.setData(_FILTER_ROLE, item.text().lower())
+
             item.setForeground(QColor(_ROW_QUIET))
             # No box at all, not a greyed-out one. Under a heading that says
             # these are not installed, a checkbox that cannot be ticked is a
@@ -1915,9 +1928,12 @@ class MainWindow(QMainWindow):
                 item.setData(_PACKAGE_NAME_ROLE, package.name)
                 item.setData(_PACKAGE_PATH_ROLE, str(package.path))
                 item.setData(_VERSION_ROLE, package.version)
-                item.setData(_FILTER_ROLE, ("%s %s %s" % (
-                    package.name, package.version, folder
-                )).lower())
+                # What the row shows, so what you type matches what you
+                # are looking at.
+                item.setData(
+                    _FILTER_ROLE,
+                    row_label([package.name, package.version, folder]).lower(),
+                )
                 if built_from is not None and Path(built_from).is_dir():
                     item.setData(_BUILT_FROM_ROLE, str(built_from))
 
