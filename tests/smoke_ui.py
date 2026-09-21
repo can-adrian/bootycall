@@ -961,6 +961,55 @@ check(
     str([t for t in dev_texts if "nuke_utils" in t]),
 )
 
+print("\na window opens cleanly from a store that is not the default")
+# Every other check in this suite runs against one window built from an empty
+# store, so a setting that is only ever *read* at construction was never read
+# by a test at all. Switching local packages off and reopening raised
+# AttributeError: the checkbox was set from inside __init__, which emitted
+# checkChanged, and the handler reads both frames -- switching one root off
+# changes what the other overrides -- while only the local one existed yet.
+# Qt does not propagate an exception out of a slot, so the window still
+# opened, minus the greying the handler never reached.
+import json  # noqa: E402
+import tempfile  # noqa: E402
+
+_saved_config = os.environ.get("BOOTYCALL_CONFIG_FILE")
+_off_config = Path(tempfile.mkdtemp(prefix="bootycall-prefs-")) / "configs.json"
+_off_config.write_text(
+    json.dumps({"version": 1, "configs": [], "preferences": {"use_local": False}})
+)
+os.environ["BOOTYCALL_CONFIG_FILE"] = str(_off_config)
+_raised: list[str] = []
+_real_hook = sys.excepthook
+sys.excepthook = lambda kind, value, tb: _raised.append("%s: %s" % (kind.__name__, value))
+try:
+    _reopened = MainWindow()
+    QApplication.processEvents()
+finally:
+    sys.excepthook = _real_hook
+    if _saved_config is None:
+        os.environ.pop("BOOTYCALL_CONFIG_FILE", None)
+    else:
+        os.environ["BOOTYCALL_CONFIG_FILE"] = _saved_config
+
+check("opening it raises nothing", _raised == [], str(_raised))
+check(
+    "the saved state is restored",
+    not _reopened.local_frame.is_checked() and _reopened.dev_frame.is_checked(),
+    "local=%s dev=%s"
+    % (_reopened.local_frame.is_checked(), _reopened.dev_frame.is_checked()),
+)
+check(
+    "and the list it switched off is greyed on open, not only after you "
+    "touch the checkbox",
+    not _reopened.local_list.isEnabled() and _reopened.dev_list.isEnabled(),
+    "local=%s dev=%s"
+    % (_reopened.local_list.isEnabled(), _reopened.dev_list.isEnabled()),
+)
+_reopened.close()
+_reopened.deleteLater()
+QApplication.processEvents()
+
 print("\npackage sections can be switched off")
 check("the two optional sections have a checkbox", all(f.check_box is not None for f in (window.local_frame, window.dev_frame)))
 check("both checked by default", all(f.is_checked() for f in (window.local_frame, window.dev_frame)))

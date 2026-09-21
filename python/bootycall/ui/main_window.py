@@ -533,7 +533,14 @@ class MainWindow(QMainWindow):
         self.local_frame.headerMenuRequested.connect(
             lambda point: self._on_section_menu("local", point)
         )
+        # Blocked: this is the saved state being restored, not somebody
+        # clicking. Unblocked, setting it to False emitted checkChanged from
+        # inside __init__, and the handler -- which reads both frames,
+        # because switching one root off changes what the other overrides --
+        # ran before the dev section existed.
+        _blocked = self.local_frame.blockSignals(True)
         self.local_frame.set_checked(self._use_local)
+        self.local_frame.blockSignals(_blocked)
         root.addWidget(self.local_frame)
         self._local_index = root.count() - 1
 
@@ -550,9 +557,16 @@ class MainWindow(QMainWindow):
         self.dev_frame.headerMenuRequested.connect(
             lambda point: self._on_section_menu("dev", point)
         )
+        _blocked = self.dev_frame.blockSignals(True)
         self.dev_frame.set_checked(self._use_dev)
+        self.dev_frame.blockSignals(_blocked)
         root.addWidget(self.dev_frame)
         self._dev_index = root.count() - 1
+
+        # Both frames exist now, so the state they were just given can be
+        # applied. Doing this here rather than letting the signal do it is
+        # what makes the order explicit instead of load-bearing.
+        self._apply_package_use()
 
         root.addStretch(0)
         self._spacer_index = root.count() - 1
@@ -2921,6 +2935,16 @@ class MainWindow(QMainWindow):
             return None
         return view
 
+    def _apply_package_use(self) -> None:
+        """Grey the lists whose section is switched off.
+
+        Separate from the handler because it is also what the window does to
+        itself on open, where there is no change to record and nothing to
+        report -- the state was already true before the window existed.
+        """
+        self.local_list.setEnabled(self._use_local)
+        self.dev_list.setEnabled(self._use_dev)
+
     def _on_package_use_changed(self, _checked: bool) -> None:
         self._use_local = self.local_frame.is_checked()
         self._use_dev = self.dev_frame.is_checked()
@@ -2930,11 +2954,7 @@ class MainWindow(QMainWindow):
 
         # A section that is switched off cannot be overriding anything, so the
         # marking on both sides has to be redrawn, not just greyed.
-        for frame, listing, on in (
-            (self.local_frame, self.local_list, self._use_local),
-            (self.dev_frame, self.dev_list, self._use_dev),
-        ):
-            listing.setEnabled(on)
+        self._apply_package_use()
         tool = self._current_tool()
         if tool and self._bootstrap is not None:
             self._show_packages(tool)

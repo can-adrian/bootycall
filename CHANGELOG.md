@@ -10,6 +10,28 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.21.3
+
+Patch: fixes a traceback on open for anyone who had switched local packages
+off.
+
+- `AttributeError: 'MainWindow' object has no attribute 'dev_frame'`. The
+  local section's checkbox was set from inside `__init__`, which emitted
+  `checkChanged`, and the handler reads *both* frames — switching one root off
+  changes what the other overrides — while only the local one existed yet.
+  Restoring saved state is not somebody clicking, so the signal is blocked for
+  it, and the state both frames were given is applied once, after both exist.
+- The greying that handler never reached now happens on open. Before this, a
+  window opened with local packages off showed a live-looking list under an
+  unticked box until you touched the checkbox.
+- This was reachable since sections first became switchable, and no test ever
+  hit it: every check in the UI suite ran against one window built from an
+  empty store, so a preference that is only *read* at construction was never
+  read by a test at all. The suite now opens a second window from a store with
+  something in it, and fails on an exception raised inside a slot — Qt does
+  not propagate those, which is why the window still opened and the bug
+  reached a release.
+
 ## 0.21.2
 
 Patch: dev rows are spelled the way the disk spells them.
