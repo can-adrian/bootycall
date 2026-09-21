@@ -1,20 +1,23 @@
 """Row painting for the package lists.
 
 Every row in these lists is several things at once: a package, where its
-source lives, and what this window has worked out about it. Written as one
-string -- ``rig_utils-1.12.1  (alembic)  overrides rig_utils-1`` -- the reader
-has to parse it to see which part is which, and nothing lines up with the row
-above, so a list of twenty builds is twenty separate acts of reading.
+source lives, and what this window has worked out about it --
+``rig_utils  1.12.1  alembic    (in use)``.
 
-So a row that carries :data:`CELLS_ROLE` is drawn in columns: name, version,
-the folder it came from, and what this window has to say about it. The columns
-are measured once across the whole list, so they line up down it, and the
-folder column is capped rather than allowed to push the last column off the
-edge. Anything in brackets is italic -- ``(in use)``, ``(overridden)``,
-``(live)`` -- because those are the window talking, not the package.
+Qt's default item painting draws all of that in one weight, so the reader has
+to parse the string to see which part is which. This delegate italicises
+anything in brackets, which is exactly the set of asides -- ``(in use)``,
+``(overridden)``, ``(live)``, ``(symlinked)`` -- and leaves the package itself
+upright.
 
-A row with no cells is drawn the old way, as one string with its bracketed
-asides italicised. That is what the resolve and local lists still use.
+It also shifts rows marked with :data:`INDENT_ROLE`. Those are the ones with
+no checkbox, which Qt draws further left than the rows that have one; without
+the shift they would stick out to the left of everything beside them.
+
+The parts run left to right with the spacing the text itself carries. Column
+alignment was tried and read worse: a version column pushed out by one long
+name leaves every other row with a gap in the middle of it, and the eye ends
+up following the whitespace rather than the packages.
 
 It paints only the text. The checkbox, the selection background and the focus
 rectangle are still drawn by the style, because reimplementing those is how a
@@ -26,7 +29,7 @@ from __future__ import annotations
 import re
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QFontMetrics
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QApplication,
     QStyle,
@@ -38,24 +41,15 @@ from PySide6.QtWidgets import (
 #: unclosed bracket cannot swallow the rest of the row.
 _BRACKETED = re.compile(r"(\([^()\n]*\))")
 
-#: A row's cells: ``(name, version, folder, status)``. Any of them may be
-#: empty, and an empty one still holds its column open, which is the point.
+#: A row's parts: ``(name, version, folder, status)``. Not used for painting
+#: -- the row's own text is what gets drawn -- but it is what lets the window
+#: rewrite the status without parsing its way back through the rest.
 #: Deliberately far from the roles the window itself hands out, so the two
 #: blocks cannot grow into each other.
 CELLS_ROLE = Qt.UserRole + 21
 
-#: Set on a row that has no checkbox but sits among rows that do. Qt draws
-#: such a row's text further left, so without this it would stick out to the
-#: left of every row beside it -- which is the opposite of lining up.
+#: Set on a row that has no checkbox but sits among rows that do.
 INDENT_ROLE = Qt.UserRole + 20
-
-#: Space between columns.
-_GUTTER = 14
-
-#: The most of the row the folder column may take. A worktree named after a
-#: JIRA ticket and a description should elide rather than shove the column
-#: that says whether the package is in the environment off the edge.
-_FOLDER_SHARE = 0.34
 
 
 def runs(text: str) -> list[tuple[str, bool]]:
@@ -86,55 +80,15 @@ def indent_for(opt, style, widget) -> int:
     return max(shift, 0)
 
 
-def column_widths(widget, font=None) -> tuple[int, int, int]:
-    """Widest name, version and folder in ``widget``, in pixels.
-
-    Measured across every row rather than per row, because a column that is
-    only as wide as the row it is in is not a column.
-    """
-    metrics = QFontMetrics(font if font is not None else widget.font())
-    widest = [0, 0, 0]
-    for row in range(widget.count()):
-        cells = widget.item(row).data(CELLS_ROLE)
-        if not cells:
-            continue
-        for column in range(3):
-            text = cells[column] if column < len(cells) else ""
-            if text:
-                widest[column] = max(widest[column], metrics.horizontalAdvance(text))
-    return tuple(widest)  # type: ignore[return-value]
-
-
 class PackageItemDelegate(QStyledItemDelegate):
-    """Draws package rows in columns, with the window's asides in italic."""
-
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self._columns: tuple[int, int, int] | None = None
-
-    def invalidate_columns(self) -> None:
-        """Forget the measured column widths.
-
-        Called when the list is rebuilt. The status column is rewritten far
-        more often than that, but it is the last one and nothing lines up
-        behind it, so it costs no remeasuring.
-        """
-        self._columns = None
-
-    def _widths(self, widget, font) -> tuple[int, int, int]:
-        if self._columns is None:
-            self._columns = column_widths(widget, font)
-        return self._columns
-
-    # -- painting ----------------------------------------------------------
+    """Draws package rows with the window's asides in italic."""
 
     def paint(self, painter, option, index) -> None:  # noqa: N802 - Qt's name
         opt = QStyleOptionViewItem(option)
         self.initStyleOption(opt, index)
-        cells = index.data(CELLS_ROLE)
         indented = bool(index.data(INDENT_ROLE))
         parts = runs(opt.text)
-        if not cells and len(parts) < 2 and not indented:
+        if len(parts) < 2 and not indented:
             # Nothing to set apart and nothing to line up. Hand it back to Qt
             # rather than repainting it slightly differently by hand.
             super().paint(painter, option, index)
@@ -158,50 +112,7 @@ class PackageItemDelegate(QStyledItemDelegate):
         painter.save()
         painter.setClipRect(rect)
         painter.setPen(self._colour(opt, index))
-        if cells and widget is not None:
-            self._paint_cells(painter, opt, rect, widget, list(cells))
-        else:
-            self._paint_runs(painter, opt, rect, parts, float(rect.left()))
-        painter.restore()
-
-    @staticmethod
-    def _colour(opt, index) -> QColor:
-        colour = opt.palette.text().color()
-        if opt.state & QStyle.State_Selected:
-            return opt.palette.highlightedText().color()
-        given = index.data(Qt.ForegroundRole)
-        if isinstance(given, QColor):
-            return given
-        if given is not None and hasattr(given, "color"):
-            return given.color()
-        return colour
-
-    def _paint_cells(self, painter, opt, rect, widget, cells) -> None:
-        """One column at a time, each starting where every other row's does."""
-        while len(cells) < 4:
-            cells.append("")
-        name_w, version_w, folder_w = self._widths(widget, opt.font)
-        folder_w = min(folder_w, int(rect.width() * _FOLDER_SHARE))
-
         x = float(rect.left())
-        right = float(rect.right()) + 1.0
-        for column, text in enumerate(cells):
-            if x >= right:
-                break
-            if column == 3:
-                # The last column takes whatever is left: nothing lines up
-                # behind it, so capping it would only elide for the sake of it.
-                self._paint_runs(painter, opt, rect, runs(text), x)
-                break
-            width = (name_w, version_w, folder_w)[column]
-            if text:
-                self._draw(painter, opt, rect, text, x, min(width, right - x))
-            # The column holds its place even when this row's cell is empty --
-            # that is the difference between a column and a gap.
-            x += width + _GUTTER
-
-    def _paint_runs(self, painter, opt, rect, parts, x: float) -> None:
-        """Fragments end to end, brackets italic, from ``x``."""
         right = float(rect.right()) + 1.0
         for fragment, italic in parts:
             if x >= right:
@@ -209,6 +120,18 @@ class PackageItemDelegate(QStyledItemDelegate):
             x += self._draw(
                 painter, opt, rect, fragment, x, right - x, italic=italic
             )
+        painter.restore()
+
+    @staticmethod
+    def _colour(opt, index) -> QColor:
+        if opt.state & QStyle.State_Selected:
+            return opt.palette.highlightedText().color()
+        given = index.data(Qt.ForegroundRole)
+        if isinstance(given, QColor):
+            return given
+        if given is not None and hasattr(given, "color"):
+            return given.color()
+        return opt.palette.text().color()
 
     @staticmethod
     def _draw(painter, opt, rect, text, x: float, room: float, italic=False) -> float:

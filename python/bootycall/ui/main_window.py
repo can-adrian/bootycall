@@ -162,15 +162,21 @@ def row_cells(item: QListWidgetItem) -> list[str]:
 
 
 def set_cells(item: QListWidgetItem, cells) -> None:
-    """Put a row in columns, and keep its plain text in step.
+    """Write a row's parts, and the text that is drawn from them.
 
-    The text still says the whole row, because it is what a tooltip, a test
-    and every other reader of a QListWidgetItem gets. The columns are what is
-    painted.
+    The parts are kept so the status can be rewritten later without parsing a
+    way back through the rest of the row. The text is what is painted, so the
+    spacing lives here and nowhere else -- what the row says and what it looks
+    like cannot drift apart if there is only one of them.
+
+    A wider gap before the status, because that part is the window talking
+    rather than the package, and the eye needs somewhere to stop.
     """
     cells = [str(c) for c in cells]
+    head = "  ".join(c for c in cells[:3] if c)
+    status = cells[3] if len(cells) > 3 else ""
     item.setData(CELLS_ROLE, tuple(cells))
-    item.setText("  ".join(c for c in cells if c))
+    item.setText(head + ("    " + status if status else ""))
 
 
 def set_row_status(item: QListWidgetItem, status: str) -> None:
@@ -1789,9 +1795,6 @@ class MainWindow(QMainWindow):
             item.setData(INDENT_ROLE, True)
             listing.addItem(item)
 
-        delegate = listing.itemDelegate()
-        if hasattr(delegate, "invalidate_columns"):
-            delegate.invalidate_columns()
         self._refresh_dev_badge(listing, installed, missing)
         return missing
 
@@ -1950,12 +1953,6 @@ class MainWindow(QMainWindow):
                     )
                 listing.addItem(item)
 
-        delegate = listing.itemDelegate()
-        if hasattr(delegate, "invalidate_columns"):
-            # The columns are measured across the whole list, so they have to
-            # be forgotten when the list changes -- not when a row's status is
-            # rewritten, which happens far more often and moves nothing.
-            delegate.invalidate_columns()
         return packages
 
     def _add_heading(self, listing: QListWidget, text: str) -> QListWidgetItem:

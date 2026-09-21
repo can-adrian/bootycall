@@ -2209,13 +2209,24 @@ check(
     str([i.text() for i in _nuke_rows]),
 )
 check(
-    "nothing is indented: every row starts in the same column, which is what "
-    "lets you read down the versions",
+    "nothing is indented: every row starts at the same left edge",
     not any(i.data(_INDENT) for i in _nuke_rows),
     str([i.data(_INDENT) for i in _nuke_rows]),
 )
 check(
-    "and every row is in columns, so name, version and folder line up",
+    "the parts run left to right from there, with no column alignment "
+    "padding a gap into the middle of every row",
+    [i.text() for i in _nuke_rows]
+    == [
+        "nuke_utils  4.10.0    (in use)",
+        "nuke_utils  4.9.0    (overridden)",
+        "nuke_utils  4.2.1    (overridden)",
+    ],
+    str([i.text() for i in _nuke_rows]),
+)
+check(
+    "and the parts are still kept apart, so the status can be rewritten "
+    "without parsing a way back through the rest of the row",
     all(len(i.data(_CELLS)) == 4 for i in _nuke_rows),
     str([i.data(_CELLS) for i in _nuke_rows]),
 )
@@ -2655,7 +2666,7 @@ check(
     all(r.data(Qt.CheckStateRole) is None for r in _rows),
 )
 check(
-    "indented to the column the boxed rows put their text in, so the two "
+    "shifted to the left edge the boxed rows put their text at, so the two "
     "groups read as one list",
     all(r.data(_INDENT) == 1 for r in _rows),
     str([r.data(_INDENT) for r in _rows]),
@@ -2790,11 +2801,11 @@ _renamed_rows = [
     for i in range(window.dev_list.count())
     if "rig_utils" in window.dev_list.item(i).text()
 ]
-# What rez would call it leads, because that is the column every other row
-# puts its name in. The folder column is empty here: hyphens and underscores
-# are the same character for this purpose, so rig_utils-alembic-properties is
-# the package name spelled differently rather than a feature of its own, and
-# repeating it would be saying the same thing twice on one row.
+# What rez would call it leads, because that is what every other row leads
+# with. The worktree part is empty here: hyphens and underscores are the same
+# character for this purpose, so rig_utils-alembic-properties is the package
+# name spelled differently rather than a feature of its own, and repeating it
+# would be saying the same thing twice on one row.
 check(
     "an uninstalled checkout is listed by what it would build",
     _renamed_rows == ["rig_utils_alembic_properties  0.3.1"],

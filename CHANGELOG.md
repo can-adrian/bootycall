@@ -10,6 +10,23 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.21.1
+
+Patch: the dev rows run left, not in aligned columns.
+
+- **Column alignment is gone.** One long package name pushed the version
+  column out for every row in the list, so most rows ended up with a gap in
+  the middle of them and the eye followed the whitespace rather than the
+  packages. The parts now run left to right from the same left edge, with the
+  spacing the text itself carries.
+- Which means the row's text is exactly what gets painted, so the spacing
+  lives in one place and cannot drift from what a tooltip or a test reads. A
+  wider gap before the status, because that part is the window talking rather
+  than the package and the eye needs somewhere to stop.
+- A row with no checkbox is still shifted to the left edge a boxed row puts
+  its text at, measured off the style. That is what keeps the two halves of
+  the list reading as one; it was never the column alignment doing it.
+
 ## 0.21.0
 
 Minor: the dev list is in columns, and its checkboxes pick which build is
