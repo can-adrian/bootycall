@@ -22,6 +22,8 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QInputDialog,
+    QDialog,
+    QFileDialog,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -37,7 +39,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import __version__, config, dev_install, launcher, platform_hints, probe
+from .. import (
+    __version__,
+    config,
+    dev_install,
+    launcher,
+    parser,
+    pinning,
+    platform_hints,
+    probe,
+)
 from ..configs import ConfigStore, SavedConfig
 from ..discovery import (
     Project,
@@ -76,8 +87,20 @@ from .config_menu import ConfigMenuAction
 from .dcc_tile import DccTile
 from .favorites_window import FavoritesWindow
 from .flow_layout import FlowLayout
+from .pin_dialog import PinBootstrapDialog
 from .settings_dialog import SettingsDialog
-from .style import STYLESHEET, check_asset, indicator_rules
+from .style import (
+    ROW_APPENDED,
+    ROW_HEADING,
+    ROW_IN_USE,
+    ROW_LOST,
+    ROW_PLAIN,
+    ROW_QUIET,
+    ROW_STANDBY,
+    STYLESHEET,
+    check_asset,
+    indicator_rules,
+)
 
 
 #: Width of a software tile, and therefore the width compact mode aims for --
@@ -210,28 +233,15 @@ def set_row_status(item: QListWidgetItem, status: str) -> None:
     base = item.text().split("      ")[0]
     item.setText("%s      %s" % (base, status) if status else base)
 
-#: Row colours, matching the counts in the section header exactly. A header
-#: that says "2 outranked" in red over two grey rows makes the reader work out
-#: for themselves which two it meant.
-_ROW_IN_USE = "#e0a23c"      # the "N in use" note
-_ROW_LOST = "#e06c75"        # the "N outranked / N unusable" alert
-_ROW_QUIET = "#90a8c2"       # says nothing about the resolve
-_ROW_PLAIN = "#d7dae0"
-#: A dev build this window added to a resolve that never asked for it. Its own
-#: colour because it is its own thing: not the show's environment with one of
-#: your versions in it, but the show's environment plus something else.
-_ROW_APPENDED = "#4aa3df"
-
-#: Same hue as "in use", darker: a dev build the resolve names that is
-#: switched off. Unticking one does not make it stop being relevant to this
-#: show -- it just is not in play right now -- and painting it plain hid the
-#: fact that ticking it would change the launch.
-_ROW_STANDBY = "#a3762c"
-
-#: A section heading in the dev list. Dimmer than any package row: it is a
-#: label on the list, not a thing in it, and a heading that competes with the
-#: packages under it is a heading you read instead of them.
-_ROW_HEADING = "#6f8199"
+# Row colours live in style.py, so a dialog that reports on these lists uses
+# the same ones rather than a second set that drifts.
+_ROW_IN_USE = ROW_IN_USE
+_ROW_LOST = ROW_LOST
+_ROW_QUIET = ROW_QUIET
+_ROW_PLAIN = ROW_PLAIN
+_ROW_APPENDED = ROW_APPENDED
+_ROW_STANDBY = ROW_STANDBY
+_ROW_HEADING = ROW_HEADING
 
 #: Shown under the logo in quotes, one at random per launch. Stored unquoted so
 #: the list stays the source of truth for the text itself.
@@ -2244,12 +2254,26 @@ class MainWindow(QMainWindow):
         """Right-click on a section header: open what the section is a view of."""
         folders = self.section_folders(section)
         menu = QMenu(self)
+
+        # Pinning is a thing you do to the resolve, so it is offered where the
+        # resolve is shown rather than filed under a menu nobody opens.
+        pin_action = None
+        if section == "resolve":
+            pin_action = menu.addAction("Pin bootstrap to this resolve...")
+            pin_action.setEnabled(
+                self.current_project() is not None and bool(self.resolved_packages())
+            )
+            menu.addSeparator()
+
         if not folders:
-            # Said rather than shown empty: an empty menu reads as a bug in the
-            # menu, not as an answer about the folders.
-            dead = menu.addAction("Nothing to browse yet")
-            dead.setEnabled(False)
-            menu.exec(point)
+            if pin_action is None:
+                # Said rather than shown empty: an empty menu reads as a bug in
+                # the menu, not as an answer about the folders.
+                dead = menu.addAction("Nothing to browse yet")
+                dead.setEnabled(False)
+            chosen = menu.exec(point)
+            if chosen is not None and chosen is pin_action:
+                self.pin_bootstrap()
             return
 
         actions = {}
@@ -2262,6 +2286,9 @@ class MainWindow(QMainWindow):
 
         chosen = menu.exec(point)
         if chosen is None:
+            return
+        if chosen is pin_action:
+            self.pin_bootstrap()
             return
         if chosen is copy_action:
             QApplication.clipboard().setText("\n".join(p for _l, p in folders))
@@ -2276,6 +2303,107 @@ class MainWindow(QMainWindow):
             errors = self.browse_paths([path])
             if errors:
                 self.statusBar().showMessage(errors[0], 6000)
+
+    def pin_bootstrap(self) -> str:
+        """Rewrite the show's bootstrap to the versions rez actually resolved.
+
+        Returns "" or why nothing was written, so the caller does not have to
+        read the status bar to find out.
+
+        The plan is built from a fresh static parse of the file rather than
+        from ``self._bootstrap``, which may have come from *running* the
+        bootstrap. Running it says what the requests are; only reading it says
+        where they are written, and only what is written can be rewritten.
+        """
+        project = self.current_project()
+        requests = self.resolved_packages()
+        if project is None or not requests:
+            return "Pick a show and a tool first - there is nothing to pin."
+        if self._bootstrap is None or not self._bootstrap.path:
+            return "This show has no bootstrap file to pin."
+
+        path = Path(self._bootstrap.path)
+        try:
+            static = parser.parse_file(path)
+        except parser.BootstrapParseError as exc:
+            return str(exc)
+
+        self.statusBar().showMessage("Resolving with rez - this can take a minute...")
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        QApplication.processEvents()
+        try:
+            probed = launcher.resolve_probe(
+                project, requests, self.excluded_roots(), self.included_roots()
+            )
+        finally:
+            QApplication.restoreOverrideCursor()
+            self.statusBar().clearMessage()
+
+        if not probed.ok:
+            # rez's own words. A pin built on a resolve that did not happen
+            # would be a list of versions nobody has seen.
+            QMessageBox.warning(
+                self,
+                "Nothing was pinned",
+                "The resolve failed, so there are no versions to pin to.\n\n%s"
+                % (probed.error or "rez said nothing."),
+            )
+            return "the resolve failed"
+
+        dialog = PinBootstrapDialog(
+            self,
+            static,
+            probed.resolved,
+            own_roots=self.highlight_roots(),
+            tool=self._current_tool(),
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return ""
+
+        pins = dialog.pins()
+        try:
+            source = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            return "cannot read %s: %s" % (path, exc)
+        text, count = pinning.rewrite(source, pins)
+        if not count:
+            return "nothing to pin"
+
+        if dialog.overwrite():
+            destination = path
+            backup = pinning.backup_path(path, current_user())
+            try:
+                backup.write_text(source, encoding="utf-8")
+            except OSError as exc:
+                # The backup is the whole reason overwriting is allowed at
+                # all, so failing to write it stops the overwrite.
+                return "could not back up %s: %s" % (path.name, exc)
+        else:
+            backup = None
+            suggested = path.with_name("%s.pinned%s" % (path.stem, path.suffix))
+            chosen, _filter = QFileDialog.getSaveFileName(
+                self, "Save pinned bootstrap", str(suggested), "Python (*.py)"
+            )
+            if not chosen:
+                return ""
+            destination = Path(chosen)
+
+        try:
+            destination.write_text(text, encoding="utf-8")
+        except OSError as exc:
+            return "could not write %s: %s" % (destination, exc)
+
+        # The file the window is reading just changed under it.
+        self.reload_all()
+        note = "Pinned %d request%s in %s" % (
+            count,
+            "" if count == 1 else "s",
+            destination.name,
+        )
+        if backup is not None:
+            note += "  (original kept as %s)" % backup.name
+        self.statusBar().showMessage(note, 12000)
+        return ""
 
     def _on_package_menu(self, listing: QListWidget, point) -> None:
         clicked = listing.itemAt(point)

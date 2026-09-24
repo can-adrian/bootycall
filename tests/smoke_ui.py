@@ -4659,6 +4659,201 @@ for name in list(window.store.names()):
     window.store.remove(name)
 window._rebuild_file_menu()
 
+print("\npinning a bootstrap to what rez resolved")
+# The resolve is faked, because this suite has no rez. What is being checked
+# is everything either side of it: that the plan is built from the file rather
+# than from whatever the window happens to be holding, that the backup lands
+# before the overwrite, and that the file the window reads afterwards says
+# what was pinned.
+from bootycall import launcher as _launcher  # noqa: E402
+from bootycall import pinning as _pinning  # noqa: E402
+from bootycall import parser as _parser_mod  # noqa: E402
+from bootycall.ui.main_window import PinBootstrapDialog as _PinDialog  # noqa: E402
+
+_pin_show = Path("/tmp/ice/shows/pin_show/.ilp/pipeline/config.py")
+_pin_show.parent.mkdir(parents=True, exist_ok=True)
+_pin_source = (
+    'from ilp_bootstrap import Bootstrap\n'
+    '\n'
+    '\n'
+    'class ProjectBootstrap(Bootstrap):\n'
+    '\n'
+    '    host = "omg-05.ilpvfx.hq"\n'
+    '    packages = dict(maya=("maya-2026", "rig_utils-1.7"))\n'
+)
+_pin_show.write_text(_pin_source)
+
+_fake = _launcher.ResolveProbe(
+    ok=True,
+    resolved={
+        "maya": ("2026.0.1", "/tmp/ice/rez/packages/int"),
+        "rig_utils": ("1.7.8", "/tmp/ice/rez/packages/int"),
+    },
+    command="rez-env ... -- printenv",
+)
+from PySide6.QtWidgets import QDialog as _QDialog  # noqa: E402
+
+_real_probe = _launcher.resolve_probe
+_real_exec = _PinDialog.exec
+
+
+def _accept_overwrite(dialog):
+    """Stand in for the user: choose Overwrite, then press Write."""
+    dialog.overwrite_button.setChecked(True)
+    return _QDialog.Accepted
+
+
+_launcher.resolve_probe = lambda *a, **k: _fake
+_PinDialog.exec = _accept_overwrite
+
+window.reload_projects()
+QApplication.processEvents()
+unpin_all()
+pin("pin_show")
+select("maya")
+QApplication.processEvents()
+try:
+    _error = window.pin_bootstrap()
+finally:
+    _launcher.resolve_probe = _real_probe
+    _PinDialog.exec = _real_exec
+
+check("it wrote something", _error == "", _error)
+_pinned_text = _pin_show.read_text()
+check(
+    "the requests are pinned to what resolved",
+    '"maya-2026.0.1"' in _pinned_text and '"rig_utils-1.7.8"' in _pinned_text,
+    _pinned_text,
+)
+check(
+    "and the string that is not a package request is untouched",
+    '"omg-05.ilpvfx.hq"' in _pinned_text,
+    _pinned_text,
+)
+_backups = sorted(_pin_show.parent.glob("config.py.*"))
+check("the original was kept beside it", len(_backups) == 1, str(_backups))
+check(
+    "byte for byte, before anything was written over it",
+    _backups[0].read_text() == _pin_source,
+    _backups[0].read_text(),
+)
+check(
+    "the window reloaded, so what it shows is the file that is now on disk",
+    "rig_utils-1.7.8" in str(window._bootstrap.packages.get("maya", ())),
+    str(window._bootstrap.packages.get("maya", ())),
+)
+
+# A second pin on the same day must not write over the morning's backup, and
+# an already-pinned file has nothing left to do.
+_launcher.resolve_probe = lambda *a, **k: _fake
+_PinDialog.exec = _accept_overwrite
+try:
+    _again = window.pin_bootstrap()
+finally:
+    _launcher.resolve_probe = _real_probe
+    _PinDialog.exec = _real_exec
+check(
+    "pinning an already-pinned file writes nothing and says so",
+    _again == "nothing to pin",
+    _again,
+)
+check(
+    "and leaves the one backup alone",
+    len(sorted(_pin_show.parent.glob("config.py.*"))) == 1,
+    str(sorted(_pin_show.parent.glob("config.py.*"))),
+)
+
+print("\nthe pin dialog itself")
+_dlg_bootstrap = _parser_mod.parse_source(_pin_source, _pin_show)
+_mine = {
+    "maya": ("2026.0.1", "/tmp/ice/rez/packages/int"),
+    "rig_utils": ("1.7.9", "/tmp/ice/rez/packages/local/adrian/dev"),
+}
+_dlg = _PinDialog(
+    window,
+    _dlg_bootstrap,
+    _mine,
+    own_roots=(("dev", "/tmp/ice/rez/packages/local/adrian/dev"),),
+    tool="maya",
+)
+check(
+    "every request is listed, not only the ones about to change - this is the "
+    "window you read to find out what it is leaving alone",
+    _dlg.listing.count() == 2,
+    str([_dlg.listing.item(i).text() for i in range(_dlg.listing.count())]),
+)
+check(
+    "a version that only exists in your own root is shown refused, with the "
+    "version and the reason on the row",
+    any(
+        "1.7.9" in _dlg.listing.item(i).text()
+        and "only in your dev" in _dlg.listing.item(i).text()
+        for i in range(_dlg.listing.count())
+    ),
+    str([_dlg.listing.item(i).text() for i in range(_dlg.listing.count())]),
+)
+# isHidden rather than isVisible: the dialog itself has never been shown, and
+# a child of an unshown parent is never isVisible() whatever it was told.
+check(
+    "and the override is offered, because there is something to override",
+    not _dlg.own_box.isHidden(),
+)
+_dlg.own_box.setChecked(True)
+QApplication.processEvents()
+check(
+    "ticking it puts that version back in the plan",
+    any(p.pinned == "rig_utils-1.7.9" and p.changes for p in _dlg.pins()),
+    str([(p.request, p.pinned, p.blocked) for p in _dlg.pins()]),
+)
+check(
+    "and the warning stays on screen rather than disappearing the moment you "
+    "agree to ignore it",
+    "only come from your own packages" in _dlg.summary.text(),
+    _dlg.summary.text(),
+)
+_dlg.own_box.setChecked(False)
+_dlg.depth_box.setCurrentIndex(
+    [i for i in range(_dlg.depth_box.count()) if _dlg.depth_box.itemData(i) == 2][0]
+)
+QApplication.processEvents()
+check(
+    "a shallower pin writes fewer components",
+    {p.name: p.pinned for p in _dlg.pins()}["maya"] == "maya-2026.0",
+    str({p.name: p.pinned for p in _dlg.pins()}),
+)
+_dlg.deleteLater()
+
+_nothing = _PinDialog(
+    window,
+    _parser_mod.parse_source(_pin_show.read_text(), _pin_show),
+    {"maya": ("2026.0.1", "/x"), "rig_utils": ("1.7.8", "/x")},
+)
+check(
+    "with nothing to change there is nothing to press",
+    not _nothing.write_button.isEnabled(),
+    _nothing.summary.text(),
+)
+_nothing.deleteLater()
+QApplication.processEvents()
+
+print("\na failed resolve pins nothing")
+_failed = _launcher.ResolveProbe(ok=False, error="rez could not resolve that")
+_launcher.resolve_probe = lambda *a, **k: _failed
+_real_warning = mw_mod.QMessageBox.warning
+mw_mod.QMessageBox.warning = staticmethod(lambda *a, **k: None)
+try:
+    _refused = window.pin_bootstrap()
+finally:
+    _launcher.resolve_probe = _real_probe
+    mw_mod.QMessageBox.warning = _real_warning
+check("it stops at the resolve", _refused == "the resolve failed", _refused)
+check(
+    "and the file is exactly as the first pin left it",
+    _pin_show.read_text() == _pinned_text,
+)
+
+unpin_all()
+
 print("\nmissing shows root")
 os.environ["BOOTYCALL_SHOWS_ROOT"] = "/tmp/does/not/exist"
 import importlib  # noqa: E402

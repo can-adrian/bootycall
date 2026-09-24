@@ -10,6 +10,50 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.22.0
+
+Minor: pin a show's bootstrap to the versions a resolve actually produced.
+
+A minor rather than a patch, although it changes nothing about how a launch is
+assembled: it is the first thing BootyCall does that writes to a show's own
+files, and that is worth a version number you can point at.
+
+- **Right-click the Resolved packages header → Pin bootstrap to this
+  resolve...** Runs the real resolve, then rewrites the requests the bootstrap
+  already names to the versions rez chose. `rig_utils-1.7` becomes
+  `rig_utils-1.7.8`.
+- **Only the requests already named**, and only string literals the parser
+  found in a package list. A hostname that happens to contain a hyphen is
+  never in scope — not because of what it looks like, but because it is not in
+  a package list the parser resolved. Everything the resolve pulled in
+  transitively is left free to move.
+- **No invented syntax.** Every pin is written in the `name-range` form the
+  file already uses, at a depth you pick: exactly what resolved, patch, or
+  feature. rez also has `==` for an exact version and it is deliberately not
+  used here — a prefix range at full depth still admits a deeper version if
+  one is ever published, which is a smaller risk than writing a form into a
+  production bootstrap that nobody here has watched rez read.
+- **It will not widen.** A request somebody already pinned tighter than the
+  chosen depth is left exactly as it is and reported. A feature that quietly
+  unlocked itself because a dialog defaulted to two components is the opposite
+  of the point.
+- **It refuses a version that only exists in your own packages**, naming each
+  one and the root it came from, with an override for the case where you mean
+  it. Such a bootstrap resolves on your machine and fails for the farm and
+  everyone else on the show.
+- **The dialog lists every request, not only the ones about to change.** It is
+  read to find out what is being left alone.
+- **Writing.** A save dialog by default. Overwriting the show's own file is
+  offered, and copies the original beside it first as
+  `config.py.<user>.DDMMYYYY` — numbered if that name is taken, because
+  pinning twice in one day is ordinary and writing over the morning's backup
+  is the one mistake here that cannot be undone. The backup is written before
+  the overwrite, and a backup that fails to write cancels it.
+- A failed resolve pins nothing and shows rez's own words. A pin built on a
+  resolve that did not happen would be a list of versions nobody has seen.
+- Row colours moved to `style.py`, so the dialog reports "in use" in the same
+  amber as the list it is reporting on rather than a second set that drifts.
+
 ## 0.21.3
 
 Patch: fixes a traceback on open for anyone who had switched local packages

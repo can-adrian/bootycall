@@ -5,7 +5,8 @@ cd "$(dirname "$0")"
 
 for suite in tests/test_packaging.py tests/test_parser.py tests/test_configs.py \
              tests/test_local_packages.py tests/test_probe.py \
-             tests/test_dev_install.py tests/smoke_ui.py; do
+             tests/test_dev_install.py tests/test_pinning.py \
+             tests/smoke_ui.py; do
     echo "=== $suite"
     python "$suite" > /dev/null
 done

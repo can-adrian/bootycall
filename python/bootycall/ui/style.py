@@ -430,3 +430,24 @@ QCheckBox#collapsibleCheck::indicator:disabled {
     border-color: #2b3f55;
 }
 """ % tick
+
+
+#: Row colours for the package lists, and for anything else that has to agree
+#: with them. One home, because a dialog that reports "in use" in a different
+#: amber from the list it is reporting on is a dialog about a different thing.
+ROW_IN_USE = "#e0a23c"      # the "N in use" note
+ROW_LOST = "#e06c75"        # the "N outranked / N unusable" alert
+ROW_QUIET = "#90a8c2"       # says nothing about the resolve
+ROW_PLAIN = "#d7dae0"
+#: A dev build this window added to a resolve that never asked for it. Its own
+#: colour because it is its own thing: not the show's environment with one of
+#: your versions in it, but the show's environment plus something else.
+ROW_APPENDED = "#4aa3df"
+#: Same hue as "in use", darker: a dev build the resolve names that is
+#: switched off. Unticking one does not make it stop being relevant to this
+#: show -- it just is not in play right now -- and painting it plain hid the
+#: fact that ticking it would change the launch.
+ROW_STANDBY = "#a3762c"
+#: A section heading in a list. Dimmer than any row: it is a label on the
+#: list, not a thing in it.
+ROW_HEADING = "#6f8199"
