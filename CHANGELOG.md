@@ -10,6 +10,26 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.22.1
+
+Patch: the Favourites window no longer cuts off its button labels.
+
+- Five buttons in a `QHBoxLayout` needed 553px of width in a dialog that
+  opened at 420, and a box layout that runs out of room shrinks its buttons
+  below their own hint rather than wrapping. "Add current" was getting 71px for
+  a label that needs 111, so it read as elided text.
+- The edit row is a `FlowLayout` now, the same one the software tiles use, so
+  it wraps instead of squeezing and the labels stay readable at any width the
+  window can be dragged to.
+- The dialog opens wide enough for that row on one line, measured off the
+  buttons themselves. A number typed in here would have been right until
+  somebody renamed a button or changed the stylesheet's padding — which is
+  exactly how the Settings dialog's Browse buttons got clipped.
+- The suite now checks every button in that window against its own sizeHint,
+  at the default size and dragged to the minimum. A button narrower than its
+  hint is a button with elided text on it, which is a thing a test can see and
+  a screenshot review evidently cannot.
+
 ## 0.22.0
 
 Minor: pin a show's bootstrap to the versions a resolve actually produced.

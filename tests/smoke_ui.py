@@ -4416,6 +4416,42 @@ check("first row selected", fav.selected_name() == "Nightly comp", fav.selected_
 check("row carries name and summary separately", fav.list.item(0).data(Qt.UserRole + 1) == "Nightly comp" and fav.list.item(0).data(Qt.UserRole + 2) == "batman_returns - nuke16", str(fav.list.item(0).data(Qt.UserRole + 2)))
 check("up disabled at the top", not fav.up_button.isEnabled())
 check("down enabled at the top", fav.down_button.isEnabled())
+# Five buttons need more width than a QHBoxLayout had, and a box layout that
+# runs out of room shrinks its buttons under their own hint -- so "Add current"
+# read as "Add cur...". Asked of the buttons rather than eyeballed: a button
+# narrower than its own sizeHint is a button with elided text on it.
+_fav_buttons = (
+    fav.add_button,
+    fav.rename_button,
+    fav.up_button,
+    fav.down_button,
+    fav.remove_button,
+    fav.close_button,
+    fav.open_button,
+)
+
+
+def _squeezed():
+    return [
+        (b.text(), b.sizeHint().width(), b.width())
+        for b in _fav_buttons
+        if b.width() < b.sizeHint().width()
+    ]
+
+
+check(
+    "it opens wide enough for its own buttons, so none of their labels is cut",
+    _squeezed() == [],
+    str(_squeezed()),
+)
+fav.resize(fav.minimumWidth(), fav.minimumHeight())
+for _ in range(3):
+    QApplication.processEvents()
+check(
+    "and dragged to its minimum the row wraps rather than squeezing them",
+    _squeezed() == [],
+    str(_squeezed()),
+)
 fav.resize(440, 420)
 for _ in range(3):
     QApplication.processEvents()

@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..configs import ConfigStore
+from .flow_layout import FlowLayout
 
 _NAME_ROLE = Qt.UserRole + 1
 _SUMMARY_ROLE = Qt.UserRole + 2
@@ -91,7 +92,8 @@ class FavoritesWindow(QDialog):
         self.setWindowTitle("Favourites")
         self.setObjectName("favoritesWindow")
         self.setModal(False)
-        self.resize(420, 440)
+        # Sized from the buttons at the end of __init__, once they exist and
+        # can be asked how wide they need to be.
         self.setMinimumSize(360, 300)
 
         layout = QVBoxLayout(self)
@@ -115,8 +117,12 @@ class FavoritesWindow(QDialog):
         layout.addWidget(self.list, 1)
 
         # Edit row -----------------------------------------------------------
-        edit_row = QHBoxLayout()
-        edit_row.setSpacing(8)
+        # A flow rather than a box: five buttons need more width than this
+        # dialog opens at, and a QHBoxLayout that runs out of room shrinks its
+        # buttons under their own hint, which is how "Add current" became "Add
+        # cur...". A flow wraps instead, so the labels are readable at any
+        # width the window can be dragged to.
+        edit_row = FlowLayout(spacing=8)
 
         self.add_button = QPushButton("Add current")
         self.add_button.setToolTip(
@@ -141,7 +147,6 @@ class FavoritesWindow(QDialog):
         self.remove_button.clicked.connect(self._on_remove)
         edit_row.addWidget(self.remove_button)
 
-        edit_row.addStretch(1)
         layout.addLayout(edit_row)
 
         # Footer -------------------------------------------------------------
@@ -156,6 +161,25 @@ class FavoritesWindow(QDialog):
         self.open_button.clicked.connect(self._on_open)
         footer.addWidget(self.open_button)
         layout.addLayout(footer)
+
+        # Wide enough for the edit row on one line, asked of the buttons
+        # themselves. A number typed in here would be right until somebody
+        # renamed a button or changed the stylesheet's padding.
+        buttons = (
+            self.add_button,
+            self.rename_button,
+            self.up_button,
+            self.down_button,
+            self.remove_button,
+        )
+        margins = layout.contentsMargins()
+        needed = (
+            sum(b.sizeHint().width() for b in buttons)
+            + edit_row.spacing() * (len(buttons) - 1)
+            + margins.left()
+            + margins.right()
+        )
+        self.resize(max(420, needed), 440)
 
         self.refresh()
 
