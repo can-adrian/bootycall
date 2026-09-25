@@ -10,6 +10,21 @@ Breaking changes to how a launch is assembled bump the minor; everything else
 bumps the patch. The window title carries the version, so an artist reporting a
 problem is reporting it against something specific.
 
+## 0.22.2
+
+Patch: pinning is on the Edit menu, where it can be found.
+
+- It shipped on the Resolved packages header's right-click menu and nowhere
+  else, which is a fine place for it to read and a poor place for it to be
+  discovered. **Edit → Pin bootstrap to this resolve...**, next to *Test
+  resolve with rez*, because it is the same act one step further on: that one
+  reports what rez chose, this one writes it into the show.
+- Both entries go through one handler, so both report the same way instead of
+  one of them doing nothing quietly when there is no show or tool chosen.
+- The suite checks the action is in the menubar and on the header menu. A
+  feature reachable only by a right-click nobody tries is a feature with a
+  test-shaped hole where its front door should be.
+
 ## 0.22.1
 
 Patch: the Favourites window no longer cuts off its button labels.

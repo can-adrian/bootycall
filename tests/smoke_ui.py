@@ -24,7 +24,7 @@ import fixture  # noqa: E402
 
 fixture.ensure()
 
-from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtCore import QPoint, Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QAbstractItemView, QApplication  # noqa: E402
 
@@ -55,6 +55,45 @@ def pin(name: str) -> None:
 def select(name) -> None:
     window.chip_bar.select(name)
     QApplication.processEvents()
+
+
+def _resolve_menu_labels():
+    """What the Resolved packages header's right-click menu offers.
+
+    A real QMenu.exec() blocks on a modal event loop, so the menu is built
+    against a stand-in and its labels read off that.
+    """
+    out = []
+
+    class _Menu:
+        def __init__(self, *a):
+            pass
+
+        def addAction(self, text):
+            class _Action:
+                def __init__(inner, label):
+                    inner.label = label
+                    out.append(label)
+
+                def setEnabled(inner, on):
+                    if not on:
+                        out[-1] = "%s [disabled]" % inner.label
+
+            return _Action(text)
+
+        def addSeparator(self):
+            pass
+
+        def exec(self, *a):
+            return None
+
+    real = mw_mod.QMenu
+    mw_mod.QMenu = _Menu
+    try:
+        window._on_section_menu("resolve", QPoint(5, 5))
+    finally:
+        mw_mod.QMenu = real
+    return out
 
 
 def dev_rows(visible_only: bool = False) -> list:
@@ -4797,6 +4836,25 @@ check(
     "and leaves the one backup alone",
     len(sorted(_pin_show.parent.glob("config.py.*"))) == 1,
     str(sorted(_pin_show.parent.glob("config.py.*"))),
+)
+
+check(
+    "and it is reachable from the menubar, not only from a right-click on a "
+    "section header that nobody thinks to try",
+    window.pin_action in window.edit_menu.actions(),
+    str([a.text() for a in window.edit_menu.actions()]),
+)
+check(
+    "sitting next to Test resolve, which is the same act one step earlier",
+    [a.text() for a in window.edit_menu.actions()].index(
+        window.resolve_test_action.text()
+    )
+    < [a.text() for a in window.edit_menu.actions()].index(window.pin_action.text()),
+)
+check(
+    "and the resolve header offers it too",
+    "Pin bootstrap" in " ".join(_resolve_menu_labels()),
+    str(_resolve_menu_labels()),
 )
 
 print("\nthe pin dialog itself")

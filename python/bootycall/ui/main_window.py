@@ -819,6 +819,18 @@ class MainWindow(QMainWindow):
         self.resolve_test_action.triggered.connect(self.run_resolve_test)
         self.addAction(self.resolve_test_action)
 
+        # Next to Test resolve, because it is the same act one step further on:
+        # that one reports what rez chose, this one writes it into the show.
+        # It lives on the Resolved packages header's menu too, which is where
+        # it reads best -- and nowhere anybody found it.
+        self.pin_action = QAction("&Pin bootstrap to this resolve...", self)
+        self.pin_action.setToolTip(
+            "Rewrite the requests this show's bootstrap already names to the "
+            "versions rez resolves today, so the show stops moving under you."
+        )
+        self.pin_action.triggered.connect(self._on_pin_bootstrap)
+        self.addAction(self.pin_action)
+
         self.quit_action = QAction("&Quit", self)
         self.quit_action.setShortcut(QKeySequence.Quit)
         self.quit_action.triggered.connect(self.close)
@@ -842,6 +854,8 @@ class MainWindow(QMainWindow):
         self.edit_menu.addSeparator()
         self.edit_menu.addAction(self.diagnostics_action)
         self.edit_menu.addAction(self.resolve_test_action)
+        self.edit_menu.addSeparator()
+        self.edit_menu.addAction(self.pin_action)
 
         self.software_menu = self.menuBar().addMenu("&Softwares")
         self._software_actions: dict[str, QAction] = {}
@@ -2273,7 +2287,7 @@ class MainWindow(QMainWindow):
                 dead.setEnabled(False)
             chosen = menu.exec(point)
             if chosen is not None and chosen is pin_action:
-                self.pin_bootstrap()
+                self._on_pin_bootstrap()
             return
 
         actions = {}
@@ -2288,7 +2302,7 @@ class MainWindow(QMainWindow):
         if chosen is None:
             return
         if chosen is pin_action:
-            self.pin_bootstrap()
+            self._on_pin_bootstrap()
             return
         if chosen is copy_action:
             QApplication.clipboard().setText("\n".join(p for _l, p in folders))
@@ -2303,6 +2317,12 @@ class MainWindow(QMainWindow):
             errors = self.browse_paths([path])
             if errors:
                 self.statusBar().showMessage(errors[0], 6000)
+
+    def _on_pin_bootstrap(self) -> None:
+        """The menu entry. Says why when there is nothing to pin."""
+        error = self.pin_bootstrap()
+        if error:
+            self.statusBar().showMessage(error, 8000)
 
     def pin_bootstrap(self) -> str:
         """Rewrite the show's bootstrap to the versions rez actually resolved.
